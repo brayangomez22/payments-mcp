@@ -1,0 +1,43 @@
+@base = http://localhost:3000
+@merchant = m_demo
+
+### Create a payment (run twice: second call is a replay)
+# @name create
+POST {{base}}/api/v1/payments
+Content-Type: application/json
+X-Merchant-Id: {{merchant}}
+Idempotency-Key: demo-key-0001
+
+{ "amountMinor": 150000, "currency": "COP", "description": "Pedido #1001" }
+
+### Declined (amount ending in 13)
+POST {{base}}/api/v1/payments
+Content-Type: application/json
+X-Merchant-Id: {{merchant}}
+Idempotency-Key: demo-key-0002
+
+{ "amountMinor": 10013, "currency": "COP" }
+
+### Provider timeout → 202 pending (amount ending in 99)
+POST {{base}}/api/v1/payments
+Content-Type: application/json
+X-Merchant-Id: {{merchant}}
+Idempotency-Key: demo-key-0003
+
+{ "amountMinor": 10099, "currency": "COP" }
+
+### Get
+GET {{base}}/api/v1/payments/{{create.response.body.id}}
+X-Merchant-Id: {{merchant}}
+
+### List
+GET {{base}}/api/v1/payments?limit=2
+X-Merchant-Id: {{merchant}}
+
+### Partial refund
+POST {{base}}/api/v1/payments/{{create.response.body.id}}/refunds
+Content-Type: application/json
+X-Merchant-Id: {{merchant}}
+Idempotency-Key: demo-refund-0001
+
+{ "amountMinor": 50000 }

@@ -1,0 +1,39 @@
+{
+  "name": "payments-mcp",
+  "version": "0.1.0",
+  "description": "Payments middleware exposing a REST API and an MCP server for AI agents.",
+  "type": "module",
+  "private": true,
+  "engines": {
+    "node": ">=22.9.0"
+  },
+  "scripts": {
+    "dev": "node --env-file-if-exists=.env --import tsx --watch src/server.ts",
+    "build": "tsc",
+    "start": "node --env-file-if-exists=.env dist/server.js",
+    "typecheck": "tsc --noEmit -p tsconfig.test.json",
+    "db:up": "docker compose up -d --wait postgres",
+    "db:migrate": "node --env-file-if-exists=.env --import tsx src/db/migrate.ts",
+    "test": "node --env-file-if-exists=.env --import tsx --test \"tests/**/*.test.ts\"",
+    "test:cov": "node --env-file-if-exists=.env --import tsx --test --experimental-test-coverage --test-coverage-exclude=\"tests/**\" --test-coverage-lines=85 \"tests/**/*.test.ts\""
+  },
+  "dependencies": {
+    "express": "^5.2.1",
+    "pg": "^8.23.1",
+    "pino": "^10.4.0",
+    "swagger-ui-express": "^5.0.1",
+    "valibot": "^1.5.0"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6",
+    "@types/node": "^26.6.4",
+    "@types/pg": "^8.23.1",
+    "@types/swagger-ui-express": "^4.1.8",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2"
+  },
+  "allowScripts": {
+    "@scarf/scarf": false,
+    "esbuild@0.28.2": true
+  }
+}

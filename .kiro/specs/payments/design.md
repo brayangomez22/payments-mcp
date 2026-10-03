@@ -37,12 +37,13 @@ CREATE TABLE payments (
   description     TEXT,
   provider_ref    TEXT,
   failure_reason  TEXT,
-  created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+  created_at      TIMESTAMPTZ NOT NULL,   -- la app lo asigna (precisión de ms, ver cursor)
+  updated_at      TIMESTAMPTZ NOT NULL
 );
 -- Soporta el listado por comercio (+ filtro opcional de estado) con keyset pagination.
-CREATE INDEX payments_merchant_created_idx ON payments (merchant_id, created_at DESC, id DESC);
-CREATE INDEX payments_merchant_status_created_idx ON payments (merchant_id, status, created_at DESC, id DESC);
+-- Un btree se recorre hacia atrás, así que ASC también sirve ORDER BY created_at DESC, id DESC.
+CREATE INDEX payments_merchant_created_idx ON payments (merchant_id, created_at, id);
+CREATE INDEX payments_merchant_status_created_idx ON payments (merchant_id, status, created_at, id);
 
 CREATE TABLE refunds (
   id            UUID PRIMARY KEY,
@@ -54,9 +55,8 @@ CREATE TABLE refunds (
 CREATE TABLE idempotency_keys (
   merchant_id     TEXT  NOT NULL,
   key             TEXT  NOT NULL,
-  request_hash    TEXT  NOT NULL,     -- sha256 del método + ruta + cuerpo
-  response_status INT,
-  response_body   JSONB,
+  fingerprint     TEXT  NOT NULL,     -- sha256(operación + entrada canónica)
+  response_body   JSONB,              -- NULL mientras la operación está en curso
   created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
   PRIMARY KEY (merchant_id, key)
 );
@@ -72,11 +72,16 @@ CREATE INDEX outbox_unpublished_idx ON outbox (id) WHERE published_at IS NULL;
 
 ### Por qué estos índices
 
-- `(merchant_id, created_at DESC, id DESC)` coincide con `WHERE merchant_id = $1 ORDER BY created_at
+- `(merchant_id, created_at, id)` coincide con `WHERE merchant_id = $1 ORDER BY created_at
   DESC, id DESC LIMIT n`, por lo que Postgres hace un *index scan* sin `Sort`.
 - La paginación por **cursor** (`WHERE (created_at, id) < ($2, $3)`) es O(log n) por página;
   `OFFSET` es O(n) y se degrada en páginas profundas.
 - Índice **parcial** en `outbox` para que el relay lea solo los pendientes.
+- `created_at` lo asigna la aplicación: JS tiene precisión de milisegundos y Postgres de
+  microsegundos. Si lo pusiera `now()`, el cursor perdería precisión y la paginación podría
+  saltarse o repetir filas.
+- La query del listado se arma dinámicamente en vez de `($2 IS NULL OR status = $2)`, para que
+  cada forma tenga su propio plan y use el índice adecuado.
 
 ## Máquina de estados
 
@@ -93,12 +98,20 @@ stateDiagram-v2
 
 ## Idempotencia
 
-1. Se calcula `request_hash`.
+1. Se calcula `fingerprint` = sha256 de la operación + la entrada con claves ordenadas.
+   Se guarda el *resultado del servicio* (vista JSON), no la respuesta HTTP: así REST y MCP
+   comparten la misma idempotencia.
 2. `INSERT … ON CONFLICT DO NOTHING` en `idempotency_keys` (la PK es la "cerradura").
 3. Si ya existía: si el hash coincide y hay `response_body`, se devuelve esa respuesta. Si el hash
    coincide y aún no hay respuesta (petición en curso), se devuelve `409 REQUEST_IN_PROGRESS`.
    Si el hash difiere, se devuelve `422`.
-4. Si es nueva: se ejecuta la operación y se guarda la respuesta.
+4. Si es nueva: se ejecuta la operación y se guarda la respuesta. Si la operación lanza un
+   error, la clave se **libera** para que el cliente pueda reintentar.
+
+**Limitaciones conocidas:** si el proceso muere entre `begin` y `complete`, la clave queda
+"en curso" para siempre (solución: expirar claves en curso tras N minutos). Si el reembolso del
+proveedor hace timeout dentro de la transacción, se hace rollback aunque el proveedor pudo haberlo
+ejecutado (solución: estado `refund_pending` + conciliación).
 
 **Evolución (Fase 4):** mover `idempotency_keys` a DynamoDB con PK `MERCHANT#<id>`, SK `KEY#<key>`,
 `PutItem` con `ConditionExpression attribute_not_exists(pk)` y **TTL** de 24 h. Ventaja: las claves
