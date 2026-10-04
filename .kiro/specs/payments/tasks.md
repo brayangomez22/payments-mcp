@@ -24,10 +24,10 @@
   - [x] 4.2 Tests de integración HTTP
   - _Requisitos: 1, 2, 3, 8.2_
 
-- [ ] 5. Auth
-  - [ ] 5.1 `POST /oauth/token` (client credentials), firma ES256, JWKS
-  - [ ] 5.2 Middleware `authenticate` + `requireScope`
-  - [ ] 5.3 Tests 401/403
+- [x] 5. Auth
+  - [x] 5.1 `POST /oauth/token` (client credentials), firma ES256, JWKS
+  - [x] 5.2 Middleware `authenticate` + `requireScope`
+  - [x] 5.3 Tests 401/403
   - _Requisitos: 4.1–4.4_
 
 - [ ] 6. Servidor MCP

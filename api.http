@@ -1,11 +1,27 @@
 @base = http://localhost:3000
-@merchant = m_demo
+
+### 1. Get a token for tienda_A's backend (all scopes)
+# @name token
+POST {{base}}/oauth/token
+Content-Type: application/x-www-form-urlencoded
+
+grant_type=client_credentials&client_id=tienda-a-backend&client_secret=dev-secret-tienda-a
+
+### 1b. Token for the AI agent (read + write, NO refund)
+# @name agentToken
+POST {{base}}/oauth/token
+Content-Type: application/x-www-form-urlencoded
+
+grant_type=client_credentials&client_id=tienda-a-agent&client_secret=dev-secret-agent-a
+
+### Public keys
+GET {{base}}/.well-known/jwks.json
 
 ### Create a payment (run twice: second call is a replay)
 # @name create
 POST {{base}}/api/v1/payments
 Content-Type: application/json
-X-Merchant-Id: {{merchant}}
+Authorization: Bearer {{token.response.body.access_token}}
 Idempotency-Key: demo-key-0001
 
 { "amountMinor": 150000, "currency": "COP", "description": "Pedido #1001" }
@@ -13,7 +29,7 @@ Idempotency-Key: demo-key-0001
 ### Declined (amount ending in 13)
 POST {{base}}/api/v1/payments
 Content-Type: application/json
-X-Merchant-Id: {{merchant}}
+Authorization: Bearer {{token.response.body.access_token}}
 Idempotency-Key: demo-key-0002
 
 { "amountMinor": 10013, "currency": "COP" }
@@ -21,23 +37,31 @@ Idempotency-Key: demo-key-0002
 ### Provider timeout → 202 pending (amount ending in 99)
 POST {{base}}/api/v1/payments
 Content-Type: application/json
-X-Merchant-Id: {{merchant}}
+Authorization: Bearer {{token.response.body.access_token}}
 Idempotency-Key: demo-key-0003
 
 { "amountMinor": 10099, "currency": "COP" }
 
 ### Get
 GET {{base}}/api/v1/payments/{{create.response.body.id}}
-X-Merchant-Id: {{merchant}}
+Authorization: Bearer {{token.response.body.access_token}}
 
 ### List
 GET {{base}}/api/v1/payments?limit=2
-X-Merchant-Id: {{merchant}}
+Authorization: Bearer {{token.response.body.access_token}}
 
 ### Partial refund
 POST {{base}}/api/v1/payments/{{create.response.body.id}}/refunds
 Content-Type: application/json
-X-Merchant-Id: {{merchant}}
+Authorization: Bearer {{token.response.body.access_token}}
 Idempotency-Key: demo-refund-0001
 
 { "amountMinor": 50000 }
+
+### The agent tries to refund → 403 insufficient_scope
+POST {{base}}/api/v1/payments/{{create.response.body.id}}/refunds
+Content-Type: application/json
+Authorization: Bearer {{agentToken.response.body.access_token}}
+Idempotency-Key: demo-refund-0002
+
+{ "amountMinor": 1000 }

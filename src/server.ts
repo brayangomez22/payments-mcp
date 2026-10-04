@@ -4,6 +4,7 @@ import { createPool } from './core/db/pool.js';
 import { PgIdempotencyStore } from './core/idempotency/pg-idempotency-store.js';
 import { createLogger } from './core/logger.js';
 import { loadSigningKey } from './core/auth/signing-key.js';
+import { JwtVerifier } from './core/auth/token-verifier.js';
 import { migrate } from './db/migrate.js';
 import { DEV_CLIENTS, InMemoryClientRegistry } from './features/auth/client-registry.js';
 import { TokenService } from './features/auth/token.service.js';
@@ -39,6 +40,9 @@ async function start(): Promise<void> {
     paymentService,
     tokenService,
     signingKey,
+    // Same process as the issuer, so the public key is used directly. Another service would use
+    // createRemoteJWKSet(new URL('https://<issuer>/.well-known/jwks.json')).
+    tokenVerifier: new JwtVerifier({ key: signingKey.publicKey, issuer: env.JWT_ISSUER, audience: env.JWT_AUDIENCE }),
     checkReadiness: async () => {
       await pool.query('SELECT 1');
     },

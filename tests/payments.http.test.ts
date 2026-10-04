@@ -6,15 +6,19 @@ type Server = Awaited<ReturnType<typeof startTestServer>>;
 
 describe('Payments HTTP API', () => {
   let server: Server;
+  let tiendaA: string;
+  let tiendaB: string;
   before(async () => {
     server = await startTestServer();
+    tiendaA = `Bearer ${await server.tokenFor('tienda-a-backend')}`;
+    tiendaB = `Bearer ${await server.tokenFor('tienda-b-backend')}`;
   });
   after(() => server.close());
 
   function call(method: string, path: string, init: { body?: unknown; headers?: Record<string, string> } = {}) {
     return fetch(server.baseUrl + path, {
       method,
-      headers: { 'content-type': 'application/json', 'x-merchant-id': 'm_1', ...init.headers },
+      headers: { 'content-type': 'application/json', authorization: tiendaA, ...init.headers },
       ...(init.body === undefined ? {} : { body: typeof init.body === 'string' ? init.body : JSON.stringify(init.body) }),
     });
   }
@@ -70,10 +74,10 @@ describe('Payments HTTP API', () => {
     assert.equal((await res.json()).error.code, 'INVALID_JSON');
   });
 
-  it('requires a merchant identity', async () => {
+  it('requires a Bearer token', async () => {
     const res = await fetch(`${server.baseUrl}/api/v1/payments`, { headers: {} });
     assert.equal(res.status, 401);
-    assert.equal(res.headers.get('www-authenticate'), 'Bearer');
+    assert.equal(res.headers.get('www-authenticate'), 'Bearer realm="payments-mcp"');
   });
 
   it('gets, lists and refunds', async () => {
@@ -97,7 +101,7 @@ describe('Payments HTTP API', () => {
 
   it('returns 404 for another merchant and 400 for a non-UUID id', async () => {
     const created = await (await create({ amountMinor: 500, currency: 'COP' })).json();
-    const foreign = await call('GET', `/api/v1/payments/${created.id}`, { headers: { 'x-merchant-id': 'm_2' } });
+    const foreign = await call('GET', `/api/v1/payments/${created.id}`, { headers: { authorization: tiendaB } });
     assert.equal(foreign.status, 404);
     const bad = await call('GET', '/api/v1/payments/123');
     assert.equal(bad.status, 400);
@@ -145,7 +149,7 @@ describe('Readiness and unexpected errors', () => {
     };
     try {
       const res = await fetch(`${server.baseUrl}/api/v1/payments/${crypto.randomUUID()}`, {
-        headers: { 'x-merchant-id': 'm_1' },
+        headers: { authorization: `Bearer ${await server.tokenFor('tienda-a-backend')}` },
       });
       assert.equal(res.status, 500);
       const { error } = await res.json();

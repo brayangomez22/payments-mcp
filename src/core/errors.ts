@@ -20,8 +20,10 @@ export const Errors = {
     new AppError('IDEMPOTENCY_KEY_REUSED', 422, 'Idempotency-Key was already used with a different request'),
   requestInProgress: () =>
     new AppError('REQUEST_IN_PROGRESS', 409, 'A request with this Idempotency-Key is still being processed'),
-  unauthenticated: () => new AppError('UNAUTHENTICATED', 401, 'Authentication is required'),
-  forbidden: (scope: string) => new AppError('FORBIDDEN', 403, `Missing required scope: ${scope}`),
+  unauthenticated: () => new AppError('UNAUTHENTICATED', 401, 'A Bearer token is required'),
+  invalidToken: () => new AppError('INVALID_TOKEN', 401, 'The access token is invalid or expired'),
+  forbidden: (scope: string) =>
+    new AppError('INSUFFICIENT_SCOPE', 403, `Missing required scope: ${scope}`, { requiredScope: scope }),
   notFound: () => new AppError('NOT_FOUND', 404, 'Route not found'),
   paymentNotFound: () => new AppError('PAYMENT_NOT_FOUND', 404, 'Payment not found'),
   paymentNotRefundable: (status: string) =>

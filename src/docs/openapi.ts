@@ -19,19 +19,20 @@ export const openApiDocument = {
     description: 'Payments middleware. The same operations are exposed to AI agents over MCP at /mcp.',
   },
   servers: [{ url: '/api/v1' }],
-  security: [{ merchantHeader: [] }],
   paths: {
     '/payments': {
       post: {
         summary: 'Create a payment',
         operationId: 'createPayment',
+        security: [{ oauth2: ['payments:write'] }],
         parameters: [idempotencyHeader],
         requestBody: { required: true, content: json(ref('CreatePayment')) },
         responses: {
           201: { description: 'Created; status is succeeded or failed', content: json(ref('Payment')) },
           202: { description: 'Accepted; provider outcome unknown, status is pending', content: json(ref('Payment')) },
           400: errorResponse('Validation error or missing Idempotency-Key'),
-          401: errorResponse('Unauthenticated'),
+          401: errorResponse('Missing, invalid or expired token'),
+          403: errorResponse('Token lacks the required scope'),
           409: errorResponse('Same Idempotency-Key still in progress'),
           422: errorResponse('Idempotency-Key reused with a different body'),
         },
@@ -39,6 +40,7 @@ export const openApiDocument = {
       get: {
         summary: 'List payments (newest first, cursor pagination)',
         operationId: 'listPayments',
+        security: [{ oauth2: ['payments:read'] }],
         parameters: [
           { name: 'status', in: 'query', schema: ref('PaymentStatus') },
           { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 100, default: 20 } },
@@ -61,6 +63,7 @@ export const openApiDocument = {
       get: {
         summary: 'Get a payment',
         operationId: 'getPayment',
+        security: [{ oauth2: ['payments:read'] }],
         parameters: [paymentIdParam],
         responses: { 200: { description: 'The payment', content: json(ref('Payment')) }, 404: errorResponse('Not found') },
       },
@@ -69,6 +72,7 @@ export const openApiDocument = {
       post: {
         summary: 'Refund a payment (full or partial)',
         operationId: 'refundPayment',
+        security: [{ oauth2: ['payments:refund'] }],
         parameters: [paymentIdParam, idempotencyHeader],
         requestBody: {
           required: true,
@@ -96,7 +100,20 @@ export const openApiDocument = {
   },
   components: {
     securitySchemes: {
-      merchantHeader: { type: 'apiKey', in: 'header', name: 'X-Merchant-Id', description: 'Phase 1 only; replaced by OAuth2' },
+      oauth2: {
+        type: 'oauth2',
+        description: 'Client credentials. The merchant is taken from the token, never from the request.',
+        flows: {
+          clientCredentials: {
+            tokenUrl: '/oauth/token',
+            scopes: {
+              'payments:read': 'Read payments',
+              'payments:write': 'Create payments',
+              'payments:refund': 'Refund payments',
+            },
+          },
+        },
+      },
     },
     schemas: {
       PaymentStatus: { type: 'string', enum: ['pending', 'succeeded', 'failed', 'partially_refunded', 'refunded'] },
