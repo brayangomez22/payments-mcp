@@ -1,4 +1,7 @@
 export class AppError extends Error {
+  /** RFC 9728: on a 401, tells the client where to discover how to authenticate. */
+  resourceMetadataUrl?: string;
+
   constructor(
     readonly code: string,
     readonly status: number,

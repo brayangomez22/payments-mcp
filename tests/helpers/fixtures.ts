@@ -1,3 +1,4 @@
+import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { buildApp } from '../../src/app.js';
 import { loadSigningKey } from '../../src/core/auth/signing-key.js';
@@ -38,31 +39,59 @@ export const DEV_SECRETS = {
   'tienda-b-backend': 'dev-secret-tienda-b',
 } as const;
 
-export const TOKEN_CONFIG = { issuer: 'payments-mcp', audience: 'payments-api', ttlSeconds: 900 };
+export const REST_AUDIENCE = 'payments-api';
 
 export async function startTestServer(options: { ready?: () => Promise<void> } = {}) {
-  const ctx = createService({ clock: tickingClock() });
-  const signingKey = await loadSigningKey();
-  const tokenService = new TokenService(new InMemoryClientRegistry(DEV_CLIENTS), signingKey, TOKEN_CONFIG);
-  const app = buildApp({
-    logger: silentLogger,
-    paymentService: ctx.service,
-    tokenService,
-    signingKey,
-    tokenVerifier: new JwtVerifier({ key: signingKey.publicKey, issuer: TOKEN_CONFIG.issuer, audience: TOKEN_CONFIG.audience }),
-    checkReadiness: options.ready ?? (async () => undefined),
-  });
-  const server = app.listen(0);
+  // Listen first: the issuer and the MCP resource are URLs that include the random port.
+  const server = createServer();
+  server.listen(0, '127.0.0.1');
   await new Promise<void>((resolve) => server.once('listening', resolve));
   const { port } = server.address() as AddressInfo;
+  const baseUrl = `http://127.0.0.1:${port}`;
+  const issuer = baseUrl;
+  const mcpResource = `${baseUrl}/mcp`;
+
+  const ctx = createService({ clock: tickingClock() });
+  const signingKey = await loadSigningKey();
+  const tokenService = new TokenService(new InMemoryClientRegistry(DEV_CLIENTS), signingKey, {
+    issuer,
+    audience: REST_AUDIENCE,
+    resources: [REST_AUDIENCE, mcpResource],
+    ttlSeconds: 900,
+  });
+  const verifierFor = (audience: string) => new JwtVerifier({ key: signingKey.publicKey, issuer, audience });
+  server.on(
+    'request',
+    buildApp({
+      logger: silentLogger,
+      paymentService: ctx.service,
+      tokenService,
+      signingKey,
+      tokenVerifier: verifierFor(REST_AUDIENCE),
+      mcpTokenVerifier: verifierFor(mcpResource),
+      issuer,
+      mcpResource,
+      checkReadiness: options.ready ?? (async () => undefined),
+    }),
+  );
+
   return {
     ...ctx,
     signingKey,
-    /** Issues a real token through the token service (as POST /oauth/token would). */
-    tokenFor: async (clientId: keyof typeof DEV_SECRETS, scope?: string) =>
-      (await tokenService.issue({ grantType: 'client_credentials', clientId, clientSecret: DEV_SECRETS[clientId], scope }))
-        .access_token,
-    baseUrl: `http://127.0.0.1:${port}`,
+    issuer,
+    mcpResource,
+    /** Issues a real token through the token service (as POST /oauth/token would). Default audience: REST. */
+    tokenFor: async (clientId: keyof typeof DEV_SECRETS, options: { scope?: string; resource?: string } = {}) =>
+      (
+        await tokenService.issue({
+          grantType: 'client_credentials',
+          clientId,
+          clientSecret: DEV_SECRETS[clientId],
+          scope: options.scope,
+          resource: options.resource,
+        })
+      ).access_token,
+    baseUrl,
     close: () => new Promise<void>((resolve) => server.close(() => resolve())),
   };
 }

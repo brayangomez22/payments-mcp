@@ -18,7 +18,14 @@ export interface AppDeps {
   paymentService: PaymentService;
   tokenService: TokenService;
   signingKey: SigningKey;
+  /** Verifies REST tokens (aud = the REST API). */
   tokenVerifier: TokenVerifier;
+  /** Verifies MCP tokens (aud = mcpResource). */
+  mcpTokenVerifier: TokenVerifier;
+  /** Token issuer = authorization server URL. */
+  issuer: string;
+  /** Resource identifier of the MCP endpoint, e.g. https://payments.example.com/mcp */
+  mcpResource: string;
   /** Throws if a dependency (DB) is not reachable. */
   checkReadiness: () => Promise<void>;
 }
@@ -48,9 +55,16 @@ export function buildApp(deps: AppDeps): Express {
   });
   app.use('/docs', swaggerUi.serve, swaggerUi.setup(openApiDocument));
 
-  app.use(authRoutes(deps.tokenService, deps.signingKey));
+  app.use(authRoutes(deps.tokenService, deps.signingKey, deps.issuer));
   app.use('/api/v1/payments', authenticate(deps.tokenVerifier), paymentRoutes(deps.paymentService));
-  app.use(mcpRoutes({ paymentService: deps.paymentService, tokenVerifier: deps.tokenVerifier }));
+  app.use(
+    mcpRoutes({
+      paymentService: deps.paymentService,
+      tokenVerifier: deps.mcpTokenVerifier,
+      resource: deps.mcpResource,
+      authorizationServer: deps.issuer,
+    }),
+  );
 
   app.use(notFoundHandler);
   app.use(errorHandler);

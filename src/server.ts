@@ -28,12 +28,16 @@ async function start(): Promise<void> {
     providerTimeoutMs: env.PROVIDER_TIMEOUT_MS,
   });
 
+  const issuer = env.JWT_ISSUER ?? env.PUBLIC_BASE_URL.replace(/\/$/, '');
+  const mcpResource = `${env.PUBLIC_BASE_URL.replace(/\/$/, '')}/mcp`;
   const signingKey = await loadSigningKey(env.JWT_PRIVATE_JWK);
   const tokenService = new TokenService(new InMemoryClientRegistry(DEV_CLIENTS), signingKey, {
-    issuer: env.JWT_ISSUER,
+    issuer,
     audience: env.JWT_AUDIENCE,
+    resources: [env.JWT_AUDIENCE, mcpResource],
     ttlSeconds: env.TOKEN_TTL_SECONDS,
   });
+  const verifierFor = (audience: string) => new JwtVerifier({ key: signingKey.publicKey, issuer, audience });
 
   const app = buildApp({
     logger,
@@ -42,7 +46,10 @@ async function start(): Promise<void> {
     signingKey,
     // Same process as the issuer, so the public key is used directly. Another service would use
     // createRemoteJWKSet(new URL('https://<issuer>/.well-known/jwks.json')).
-    tokenVerifier: new JwtVerifier({ key: signingKey.publicKey, issuer: env.JWT_ISSUER, audience: env.JWT_AUDIENCE }),
+    tokenVerifier: verifierFor(env.JWT_AUDIENCE),
+    mcpTokenVerifier: verifierFor(mcpResource),
+    issuer,
+    mcpResource,
     checkReadiness: async () => {
       await pool.query('SELECT 1');
     },

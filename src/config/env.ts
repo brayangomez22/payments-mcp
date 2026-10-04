@@ -8,7 +8,10 @@ const EnvSchema = v.object({
   LOG_LEVEL: v.optional(v.picklist(['debug', 'info', 'warn', 'error', 'silent']), 'info'),
   DATABASE_URL: v.pipe(v.string(), v.url()),
   PROVIDER_TIMEOUT_MS: v.optional(NumberFromString, '5000'),
-  JWT_ISSUER: v.optional(v.string(), 'payments-mcp'),
+  /** How clients reach this service. Used for the issuer and the MCP resource identifier. */
+  PUBLIC_BASE_URL: v.optional(v.pipe(v.string(), v.url()), 'http://localhost:3000'),
+  /** Defaults to PUBLIC_BASE_URL: OAuth discovery requires the issuer to be the server's URL. */
+  JWT_ISSUER: v.optional(v.string()),
   JWT_AUDIENCE: v.optional(v.string(), 'payments-api'),
   TOKEN_TTL_SECONDS: v.optional(NumberFromString, '900'),
   /** Private JWK as JSON. Omit in dev to use an ephemeral key. */

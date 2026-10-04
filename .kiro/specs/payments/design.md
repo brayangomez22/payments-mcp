@@ -129,6 +129,22 @@ expiran solas y no cargan la BD transaccional.
 
 ## Diseño MCP
 
+### Autorización según la especificación MCP (2025-11-25)
+
+1. `POST /mcp` sin token válido → `401` con
+   `WWW-Authenticate: Bearer resource_metadata=".../.well-known/oauth-protected-resource/mcp"`.
+2. Protected Resource Metadata (RFC 9728) → `resource` y `authorization_servers`.
+3. Authorization Server Metadata (RFC 8414) → `token_endpoint`, `grant_types_supported: [client_credentials]`.
+4. `POST /oauth/token` con `resource=<url>/mcp` (RFC 8707) → JWT con `aud = <url>/mcp`.
+
+- **Un token, un recurso:** el REST valida `aud = payments-api` y el MCP `aud = <url>/mcp`. Un token
+  de un lado no sirve en el otro (evita *token passthrough* y *confused deputy*).
+- **Scopes:** se concede la intersección entre lo pedido y lo permitido (RFC 6749 §3.3); solo es
+  error si no queda nada. Los clientes MCP genéricos piden todo lo que anuncia `scopes_supported`.
+- **Tools por scope:** cada tool se registra solo si el token tiene su scope.
+- `authorization_endpoint` existe solo por compatibilidad con el SDK y responde
+  `unsupported_response_type`.
+
 | Tool | Scope | Notas |
 |---|---|---|
 | `get_payment` | `payments:read` | `readOnlyHint: true` |

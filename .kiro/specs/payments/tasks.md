@@ -31,9 +31,9 @@
   - _Requisitos: 4.1–4.4_
 
 - [ ] 6. Servidor MCP
-  - [ ] 6.1 `/mcp` Streamable HTTP con validación del Bearer token
-  - [ ] 6.2 Tools filtradas por scope; `refund_payment` con confirmación
-  - [ ] 6.3 Tests con el `Client` del SDK
+  - [x] 6.1 `/mcp` Streamable HTTP con validación del Bearer token
+  - [~] 6.2 Tools filtradas por scope ✅; tools de escritura y `refund_payment` con confirmación (pendiente)
+  - [x] 6.3 Tests con el `Client` del SDK
   - _Requisitos: 5.1–5.6_
 
 - [ ] 7. Eventos

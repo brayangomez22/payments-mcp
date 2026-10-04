@@ -1,5 +1,5 @@
 import { McpServer } from '@modelcontextprotocol/server';
-import type { AuthContext } from '../core/auth/auth-context.js';
+import type { AuthContext, Scope } from '../core/auth/auth-context.js';
 import type { Logger } from '../core/logger.js';
 import type { PaymentService } from '../features/payments/payment.service.js';
 import { runTool, toolSuccess } from './tool-result.js';
@@ -31,7 +31,22 @@ export function buildMcpServer({ paymentService, auth, logger }: McpServerDeps):
   );
   const merchant = { merchantId: auth.merchantId };
   const log = logger.child({ mcpClient: auth.clientId });
+  // A tool is only registered when the token carries its scope: tools/list shows exactly what this
+  // caller may do. What the model cannot see, it cannot be tricked into calling.
+  const can = (scope: Scope): boolean => auth.scopes.has(scope);
 
+  if (can('payments:read')) registerReadTools(server, { paymentService, merchant, log });
+
+  return server;
+}
+
+interface ToolDeps {
+  paymentService: PaymentService;
+  merchant: { merchantId: string };
+  log: Logger;
+}
+
+function registerReadTools(server: McpServer, { paymentService, merchant, log }: ToolDeps): void {
   server.registerTool(
     'get_payment',
     {
@@ -63,6 +78,4 @@ export function buildMcpServer({ paymentService, auth, logger }: McpServerDeps):
         toolSuccess(await paymentService.list(merchant, { limit: limit ?? 20, ...(status ? { status } : {}), ...(cursor ? { cursor } : {}) })),
       ),
   );
-
-  return server;
 }

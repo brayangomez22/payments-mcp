@@ -5,7 +5,7 @@ import { hashSecret, verifySecret } from '../src/core/auth/secret-hash.js';
 import { loadSigningKey } from '../src/core/auth/signing-key.js';
 import { JwtVerifier } from '../src/core/auth/token-verifier.js';
 import { exportJWK } from 'jose';
-import { startTestServer, TOKEN_CONFIG } from './helpers/fixtures.js';
+import { REST_AUDIENCE, startTestServer } from './helpers/fixtures.js';
 
 type Server = Awaited<ReturnType<typeof startTestServer>>;
 
@@ -52,15 +52,15 @@ describe('POST /oauth/token', () => {
     assert.deepEqual(await wrongSecret.json(), await unknown.json());
   });
 
-  it('refuses scopes the client is not allowed to have', async () => {
-    const res = await requestToken({
-      grant_type: 'client_credentials',
-      client_id: 'tienda-a-agent',
-      client_secret: 'dev-secret-agent-a',
-      scope: 'payments:refund',
-    });
-    assert.equal(res.status, 400);
-    assert.equal((await res.json()).error, 'invalid_scope');
+  it('narrows the request to the allowed scopes and refuses when nothing is grantable', async () => {
+    const agent = { grant_type: 'client_credentials', client_id: 'tienda-a-agent', client_secret: 'dev-secret-agent-a' };
+    const narrowed = await requestToken({ ...agent, scope: 'payments:read payments:refund' });
+    assert.equal(narrowed.status, 200);
+    assert.equal((await narrowed.json()).scope, 'payments:read', 'refund was asked for but never granted');
+
+    const nothing = await requestToken({ ...agent, scope: 'payments:refund' });
+    assert.equal(nothing.status, 400);
+    assert.equal((await nothing.json()).error, 'invalid_scope');
   });
 
   it('rejects other grant types and missing credentials', async () => {
@@ -91,8 +91,8 @@ describe('Bearer authentication on /api/v1/payments', () => {
     const now = Math.floor(Date.now() / 1000);
     return new SignJWT({ merchant_id: overrides.merchant ?? 'tienda_A', scope: 'payments:read' })
       .setProtectedHeader({ alg: 'ES256', typ: overrides.typ ?? 'at+jwt' })
-      .setIssuer(TOKEN_CONFIG.issuer)
-      .setAudience(overrides.aud ?? TOKEN_CONFIG.audience)
+      .setIssuer(server.issuer)
+      .setAudience(overrides.aud ?? REST_AUDIENCE)
       .setSubject('tienda-a-backend')
       .setIssuedAt(now)
       .setExpirationTime(overrides.exp ?? now + 60)
@@ -136,7 +136,7 @@ describe('Bearer authentication on /api/v1/payments', () => {
   it('rejects a tampered payload (changing merchant_id breaks the signature)', async () => {
     const [header, , signature] = (await forge()).split('.');
     const evilPayload = Buffer.from(
-      JSON.stringify({ merchant_id: 'tienda_B', scope: 'payments:read', sub: 'x', iss: TOKEN_CONFIG.issuer, aud: TOKEN_CONFIG.audience, exp: 9999999999 }),
+      JSON.stringify({ merchant_id: 'tienda_B', scope: 'payments:read', sub: 'x', iss: server.issuer, aud: REST_AUDIENCE, exp: 9999999999 }),
     ).toString('base64url');
     await assertInvalidToken(`${header}.${evilPayload}.${signature}`);
   });
@@ -178,7 +178,7 @@ describe('Scope authorization (4.3)', () => {
   });
 
   it('a read-only token cannot create payments', async () => {
-    const readOnly = await server.tokenFor('tienda-a-backend', 'payments:read');
+    const readOnly = await server.tokenFor('tienda-a-backend', { scope: 'payments:read' });
     assert.equal((await call('GET', '/api/v1/payments', readOnly)).status, 200);
     assert.equal((await call('POST', '/api/v1/payments', readOnly, { amountMinor: 1, currency: 'COP' })).status, 403);
   });
