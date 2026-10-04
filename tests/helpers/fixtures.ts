@@ -1,5 +1,8 @@
 import type { AddressInfo } from 'node:net';
 import { buildApp } from '../../src/app.js';
+import { loadSigningKey } from '../../src/core/auth/signing-key.js';
+import { DEV_CLIENTS, InMemoryClientRegistry } from '../../src/features/auth/client-registry.js';
+import { TokenService } from '../../src/features/auth/token.service.js';
 import { createLogger } from '../../src/core/logger.js';
 import { PaymentService } from '../../src/features/payments/payment.service.js';
 import { FakeProvider } from '../../src/integrations/provider/fake-provider.js';
@@ -28,11 +31,17 @@ export function tickingClock(start = Date.parse('2026-10-01T00:00:00.000Z')): ()
   return () => new Date(t++);
 }
 
+export const TOKEN_CONFIG = { issuer: 'payments-mcp', audience: 'payments-api', ttlSeconds: 900 };
+
 export async function startTestServer(options: { ready?: () => Promise<void> } = {}) {
   const ctx = createService({ clock: tickingClock() });
+  const signingKey = await loadSigningKey();
+  const tokenService = new TokenService(new InMemoryClientRegistry(DEV_CLIENTS), signingKey, TOKEN_CONFIG);
   const app = buildApp({
     logger: silentLogger,
     paymentService: ctx.service,
+    tokenService,
+    signingKey,
     checkReadiness: options.ready ?? (async () => undefined),
   });
   const server = app.listen(0);
@@ -40,6 +49,7 @@ export async function startTestServer(options: { ready?: () => Promise<void> } =
   const { port } = server.address() as AddressInfo;
   return {
     ...ctx,
+    signingKey,
     baseUrl: `http://127.0.0.1:${port}`,
     close: () => new Promise<void>((resolve) => server.close(() => resolve())),
   };

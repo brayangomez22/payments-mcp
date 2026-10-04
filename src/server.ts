@@ -3,7 +3,10 @@ import { loadEnv } from './config/env.js';
 import { createPool } from './core/db/pool.js';
 import { PgIdempotencyStore } from './core/idempotency/pg-idempotency-store.js';
 import { createLogger } from './core/logger.js';
+import { loadSigningKey } from './core/auth/signing-key.js';
 import { migrate } from './db/migrate.js';
+import { DEV_CLIENTS, InMemoryClientRegistry } from './features/auth/client-registry.js';
+import { TokenService } from './features/auth/token.service.js';
 import { PaymentService } from './features/payments/payment.service.js';
 import { PgPaymentStore } from './features/payments/pg-payment.repository.js';
 import { FakeProvider } from './integrations/provider/fake-provider.js';
@@ -24,9 +27,18 @@ async function start(): Promise<void> {
     providerTimeoutMs: env.PROVIDER_TIMEOUT_MS,
   });
 
+  const signingKey = await loadSigningKey(env.JWT_PRIVATE_JWK);
+  const tokenService = new TokenService(new InMemoryClientRegistry(DEV_CLIENTS), signingKey, {
+    issuer: env.JWT_ISSUER,
+    audience: env.JWT_AUDIENCE,
+    ttlSeconds: env.TOKEN_TTL_SECONDS,
+  });
+
   const app = buildApp({
     logger,
     paymentService,
+    tokenService,
+    signingKey,
     checkReadiness: async () => {
       await pool.query('SELECT 1');
     },

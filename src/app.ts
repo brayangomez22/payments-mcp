@@ -4,13 +4,18 @@ import { placeholderAuth } from './core/auth/placeholder-auth.js';
 import { errorHandler, notFoundHandler } from './core/http/error-handler.js';
 import { requestContext } from './core/http/request-context.js';
 import type { Logger } from './core/logger.js';
+import type { SigningKey } from './core/auth/signing-key.js';
 import { openApiDocument } from './docs/openapi.js';
+import { authRoutes } from './features/auth/auth.routes.js';
+import type { TokenService } from './features/auth/token.service.js';
 import { paymentRoutes } from './features/payments/payment.routes.js';
 import type { PaymentService } from './features/payments/payment.service.js';
 
 export interface AppDeps {
   logger: Logger;
   paymentService: PaymentService;
+  tokenService: TokenService;
+  signingKey: SigningKey;
   /** Throws if a dependency (DB) is not reachable. */
   checkReadiness: () => Promise<void>;
 }
@@ -40,6 +45,7 @@ export function buildApp(deps: AppDeps): Express {
   });
   app.use('/docs', swaggerUi.serve, swaggerUi.setup(openApiDocument));
 
+  app.use(authRoutes(deps.tokenService, deps.signingKey));
   app.use('/api/v1/payments', placeholderAuth, paymentRoutes(deps.paymentService));
 
   app.use(notFoundHandler);

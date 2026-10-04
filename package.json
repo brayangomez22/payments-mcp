@@ -16,10 +16,12 @@
     "db:migrate": "node --env-file-if-exists=.env --import tsx src/db/migrate.ts",
     "test": "node --env-file-if-exists=.env --import tsx --test \"tests/**/*.test.ts\"",
     "test:cov": "node --env-file-if-exists=.env --import tsx --test --experimental-test-coverage --test-coverage-exclude=\"tests/**\" --test-coverage-lines=85 \"tests/**/*.test.ts\"",
-    "demo:explain": "node scripts/explain-demo.mjs"
+    "demo:explain": "node scripts/explain-demo.mjs",
+    "hash-secret": "node --import tsx scripts/hash-secret.ts"
   },
   "dependencies": {
     "express": "^5.2.1",
+    "jose": "^6.2.12",
     "pg": "^8.23.1",
     "pino": "^10.4.0",
     "swagger-ui-express": "^5.0.1",

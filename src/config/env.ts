@@ -8,6 +8,11 @@ const EnvSchema = v.object({
   LOG_LEVEL: v.optional(v.picklist(['debug', 'info', 'warn', 'error', 'silent']), 'info'),
   DATABASE_URL: v.pipe(v.string(), v.url()),
   PROVIDER_TIMEOUT_MS: v.optional(NumberFromString, '5000'),
+  JWT_ISSUER: v.optional(v.string(), 'payments-mcp'),
+  JWT_AUDIENCE: v.optional(v.string(), 'payments-api'),
+  TOKEN_TTL_SECONDS: v.optional(NumberFromString, '900'),
+  /** Private JWK as JSON. Omit in dev to use an ephemeral key. */
+  JWT_PRIVATE_JWK: v.optional(v.string()),
 });
 
 export type Env = v.InferOutput<typeof EnvSchema>;
