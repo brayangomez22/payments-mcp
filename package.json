@@ -17,9 +17,14 @@
     "test": "node --env-file-if-exists=.env --import tsx --test \"tests/**/*.test.ts\"",
     "test:cov": "node --env-file-if-exists=.env --import tsx --test --experimental-test-coverage --test-coverage-exclude=\"tests/**\" --test-coverage-lines=85 \"tests/**/*.test.ts\"",
     "demo:explain": "node scripts/explain-demo.mjs",
-    "hash-secret": "node --import tsx scripts/hash-secret.ts"
+    "hash-secret": "node --import tsx scripts/hash-secret.ts",
+    "demo:mcp-wire": "node --import tsx scripts/mcp-wire-demo.mts"
   },
   "dependencies": {
+    "@modelcontextprotocol/express": "^2.0.2",
+    "@modelcontextprotocol/node": "^2.1.1",
+    "@modelcontextprotocol/server": "^2.3.0",
+    "@valibot/to-json-schema": "^1.8.0",
     "express": "^5.2.1",
     "jose": "^6.2.12",
     "pg": "^8.23.1",
@@ -29,6 +34,7 @@
   },
   "devDependencies": {
     "@electric-sql/pglite": "^0.5.8",
+    "@modelcontextprotocol/client": "^2.3.0",
     "@types/express": "^5.0.6",
     "@types/node": "^26.6.4",
     "@types/pg": "^8.23.1",
