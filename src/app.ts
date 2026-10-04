@@ -11,6 +11,7 @@ import { authRoutes } from './features/auth/auth.routes.js';
 import type { TokenService } from './features/auth/token.service.js';
 import { paymentRoutes } from './features/payments/payment.routes.js';
 import type { PaymentService } from './features/payments/payment.service.js';
+import { mcpRoutes } from './mcp/mcp.routes.js';
 
 export interface AppDeps {
   logger: Logger;
@@ -49,6 +50,7 @@ export function buildApp(deps: AppDeps): Express {
 
   app.use(authRoutes(deps.tokenService, deps.signingKey));
   app.use('/api/v1/payments', authenticate(deps.tokenVerifier), paymentRoutes(deps.paymentService));
+  app.use(mcpRoutes({ paymentService: deps.paymentService, tokenVerifier: deps.tokenVerifier }));
 
   app.use(notFoundHandler);
   app.use(errorHandler);

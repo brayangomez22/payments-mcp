@@ -6,7 +6,8 @@ declare global {
     interface Request {
       requestId: string;
       log: Logger;
-      auth?: AuthContext;
+      /** Verified caller. Not `auth`: the MCP SDK reserves req.auth for its own AuthInfo type. */
+      caller?: AuthContext;
     }
   }
 }
