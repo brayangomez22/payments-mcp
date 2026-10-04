@@ -12,6 +12,7 @@ import {
   toRefundView,
   type Payment,
   type PaymentPage,
+  type PaymentStatus,
   type PaymentView,
   type Refund,
   type RefundView,
@@ -28,6 +29,31 @@ export interface PaymentServiceDeps {
   logger: Logger;
   providerTimeoutMs: number;
   clock?: () => Date;
+}
+
+export interface RefundPreview {
+  payment: PaymentView;
+  refundAmountMinor: number;
+  statusAfter: PaymentStatus;
+  remainingAfterMinor: number;
+}
+
+/** The refund rules, in one place: used by the real refund and by its preview. Pure. */
+export function planRefund(
+  payment: Payment,
+  amountMinor: number,
+): { providerRef: string; refundedMinor: number; status: PaymentStatus } {
+  if (!REFUNDABLE_STATUSES.has(payment.status) || !payment.providerRef) {
+    throw Errors.paymentNotRefundable(payment.status);
+  }
+  const remaining = payment.amountMinor - payment.refundedMinor;
+  if (amountMinor > remaining) throw Errors.refundExceedsAmount(remaining);
+  const refundedMinor = payment.refundedMinor + amountMinor;
+  return {
+    providerRef: payment.providerRef,
+    refundedMinor,
+    status: refundedMinor === payment.amountMinor ? 'refunded' : 'partially_refunded',
+  };
 }
 
 export interface RefundOutcome {
@@ -116,16 +142,12 @@ export class PaymentService {
         // Row lock: two concurrent refunds on the same payment are serialized here.
         const payment = await repo.findByIdForUpdate(ctx.merchantId, paymentId);
         if (!payment) throw Errors.paymentNotFound();
-        if (!REFUNDABLE_STATUSES.has(payment.status) || !payment.providerRef) {
-          throw Errors.paymentNotRefundable(payment.status);
-        }
-        const remaining = payment.amountMinor - payment.refundedMinor;
-        if (input.amountMinor > remaining) throw Errors.refundExceedsAmount(remaining);
+        const plan = planRefund(payment, input.amountMinor);
 
         const refundId = randomUUID();
         const { providerRef } = await this.deps.provider
           .refund(
-            { providerRef: payment.providerRef, amountMinor: input.amountMinor, reference: refundId },
+            { providerRef: plan.providerRef, amountMinor: input.amountMinor, reference: refundId },
             AbortSignal.timeout(this.deps.providerTimeoutMs),
           )
           .catch((err: unknown) => {
@@ -135,18 +157,28 @@ export class PaymentService {
 
         const now = this.clock();
         const refund: Refund = { id: refundId, paymentId, amountMinor: input.amountMinor, providerRef, createdAt: now };
-        const refundedMinor = payment.refundedMinor + input.amountMinor;
-        const updated: Payment = {
-          ...payment,
-          refundedMinor,
-          status: refundedMinor === payment.amountMinor ? 'refunded' : 'partially_refunded',
-          updatedAt: now,
-        };
+        const updated: Payment = { ...payment, refundedMinor: plan.refundedMinor, status: plan.status, updatedAt: now };
         await repo.insertRefund(refund);
         await repo.update(updated);
         return { refund: toRefundView(refund), payment: toPaymentView(updated) };
       }),
     );
+  }
+
+  /**
+   * What a refund WOULD do, with the same rules as refund(), without changing anything.
+   * Throws the same errors (not found, not refundable, exceeds amount).
+   */
+  async previewRefund(ctx: MerchantContext, paymentId: string, input: RefundPaymentInput): Promise<RefundPreview> {
+    const payment = await this.deps.store.repo.findById(ctx.merchantId, paymentId);
+    if (!payment) throw Errors.paymentNotFound();
+    const plan = planRefund(payment, input.amountMinor);
+    return {
+      payment: toPaymentView(payment),
+      refundAmountMinor: input.amountMinor,
+      statusAfter: plan.status,
+      remainingAfterMinor: payment.amountMinor - plan.refundedMinor,
+    };
   }
 
   /** Returns null when the outcome is unknown (timeout/network): the payment stays pending. */

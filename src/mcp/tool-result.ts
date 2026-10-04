@@ -13,11 +13,7 @@ export function toolSuccess<T extends object>(data: T): CallToolResult & { struc
  * self-correct. Anything else becomes a generic message: SQL errors or stack traces must never
  * reach the model (it may echo them to the user, or an attacker may be probing).
  */
-export async function runTool<T extends object>(
-  logger: Logger,
-  tool: string,
-  body: () => Promise<CallToolResult & { structuredContent: T }>,
-): Promise<CallToolResult> {
+export async function runTool(logger: Logger, tool: string, body: () => Promise<CallToolResult>): Promise<CallToolResult> {
   try {
     const result = await body();
     logger.info({ tool, outcome: 'ok' }, 'mcp tool call');

@@ -221,3 +221,125 @@ describe('MCP authorization (spec discovery, audiences, scopes)', () => {
     await client.close();
   });
 });
+
+describe('MCP tools that move money', () => {
+  let server: Server;
+  before(async () => {
+    server = await startTestServer();
+  });
+  after(() => server.close());
+
+  async function connect(clientId: keyof typeof DEV_SECRETS): Promise<Client> {
+    const token = await server.tokenFor(clientId, { resource: server.mcpResource });
+    const client = new Client({ name: 'money-agent', version: '1' });
+    await client.connect(
+      new StreamableHTTPClientTransport(new URL(server.mcpResource), { requestInit: { headers: { authorization: `Bearer ${token}` } } }),
+    );
+    return client;
+  }
+  const result = (r: Awaited<ReturnType<Client['callTool']>>) => r.structuredContent as Record<string, any>;
+  const errorOf = (r: Awaited<ReturnType<Client['callTool']>>) =>
+    JSON.parse((r.content as Array<{ text: string }>)[0]?.text ?? '{}').error;
+
+  it('each client sees exactly the tools its scopes allow', async () => {
+    const backend = await connect('tienda-a-backend');
+    const agent = await connect('tienda-a-agent');
+    const names = async (c: Client) => (await c.listTools()).tools.map((t) => t.name).sort();
+    assert.deepEqual(await names(backend), ['create_payment', 'get_payment', 'list_payments', 'refund_payment']);
+    assert.deepEqual(await names(agent), ['create_payment', 'get_payment', 'list_payments'], 'the agent never sees refund_payment');
+
+    const refund = (await backend.listTools()).tools.find((t) => t.name === 'refund_payment');
+    assert.equal(refund?.annotations?.destructiveHint, true);
+    const create = (await backend.listTools()).tools.find((t) => t.name === 'create_payment');
+    assert.deepEqual(create?.inputSchema.required?.sort(), ['amountMinor', 'currency', 'idempotencyKey']);
+    await Promise.all([backend.close(), agent.close()]);
+  });
+
+  it('create_payment charges once even if the agent retries with the same key', async () => {
+    const agent = await connect('tienda-a-agent');
+    const args = { amountMinor: 150_000, currency: 'COP', description: '  Pedido 1001  ', idempotencyKey: 'order-1001' };
+    const first = await agent.callTool({ name: 'create_payment', arguments: args });
+    const retry = await agent.callTool({ name: 'create_payment', arguments: args });
+    assert.equal(result(first).status, 'succeeded');
+    assert.equal(result(first).description, 'Pedido 1001', 'Valibot still trims although trim is not in the JSON Schema');
+    assert.equal(result(retry).id, result(first).id);
+    assert.equal(server.provider.calls.charge, 1);
+    await agent.close();
+  });
+
+  it('create_payment reports pending when the processor does not answer', async () => {
+    const agent = await connect('tienda-a-agent');
+    const r = await agent.callTool({
+      name: 'create_payment',
+      arguments: { amountMinor: 1099, currency: 'USD', idempotencyKey: 'order-timeout-1' },
+    });
+    assert.equal(result(r).status, 'pending');
+    await agent.close();
+  });
+
+  it('create_payment rejects a smuggled merchant and a missing idempotency key', async () => {
+    const agent = await connect('tienda-a-agent');
+    const smuggled = await agent.callTool({
+      name: 'create_payment',
+      arguments: { amountMinor: 100, currency: 'COP', idempotencyKey: 'order-x-0001', merchantId: 'tienda_B' },
+    });
+    assert.equal(smuggled.isError, true);
+    const noKey = await agent.callTool({ name: 'create_payment', arguments: { amountMinor: 100, currency: 'COP' } });
+    assert.equal(noKey.isError, true);
+    await agent.close();
+  });
+
+  it('refund_payment without confirm only previews: nothing moves (5.5)', async () => {
+    const backend = await connect('tienda-a-backend');
+    const paid = result(
+      await backend.callTool({ name: 'create_payment', arguments: { amountMinor: 10_000, currency: 'COP', idempotencyKey: 'order-2001' } }),
+    );
+    const refundsBefore = server.provider.calls.refund;
+    const preview = result(
+      await backend.callTool({
+        name: 'refund_payment',
+        arguments: { paymentId: paid.id, amountMinor: 4000, idempotencyKey: 'order-2001-refund-1' },
+      }),
+    );
+    assert.equal(preview.preview, true);
+    assert.equal(preview.statusAfter, 'partially_refunded');
+    assert.equal(preview.remainingAfterMinor, 6000);
+    assert.match(preview.nextStep, /confirm: true/);
+    assert.equal(server.provider.calls.refund, refundsBefore, 'the processor was not called');
+    assert.equal((await server.service.get({ merchantId: 'tienda_A' }, paid.id)).refundedMinor, 0);
+
+    const done = result(
+      await backend.callTool({
+        name: 'refund_payment',
+        arguments: { paymentId: paid.id, amountMinor: 4000, idempotencyKey: 'order-2001-refund-1', confirm: true },
+      }),
+    );
+    assert.equal(done.payment.status, 'partially_refunded');
+    assert.equal(done.payment.refundedMinor, 4000);
+    await backend.close();
+  });
+
+  it('the preview applies the same rules as the real refund', async () => {
+    const backend = await connect('tienda-a-backend');
+    const paid = result(
+      await backend.callTool({ name: 'create_payment', arguments: { amountMinor: 5000, currency: 'COP', idempotencyKey: 'order-3001' } }),
+    );
+    const tooMuch = await backend.callTool({
+      name: 'refund_payment',
+      arguments: { paymentId: paid.id, amountMinor: 9999, idempotencyKey: 'order-3001-refund-1' },
+    });
+    assert.equal(tooMuch.isError, true);
+    assert.equal(errorOf(tooMuch).code, 'REFUND_EXCEEDS_AMOUNT');
+    assert.equal(errorOf(tooMuch).details.remainingMinor, 5000, 'actionable: the model can retry with the right amount');
+
+    const declined = result(
+      await backend.callTool({ name: 'create_payment', arguments: { amountMinor: 513, currency: 'COP', idempotencyKey: 'order-3002' } }),
+    );
+    const notRefundable = await backend.callTool({
+      name: 'refund_payment',
+      arguments: { paymentId: declined.id, amountMinor: 1, idempotencyKey: 'order-3002-refund-1' },
+    });
+    assert.equal(errorOf(notRefundable).code, 'PAYMENT_NOT_REFUNDABLE');
+    await backend.close();
+  });
+});
