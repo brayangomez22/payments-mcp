@@ -30,12 +30,12 @@ export function paymentRoutes(service: PaymentService): Router {
   });
 
   router.get('/:id', async (req, res) => {
-    const id = parseOrThrow(PaymentIdSchema, req.params['id']);
+    const id = parseOrThrow(PaymentIdSchema, req.params['id'], 'id');
     res.json(await service.get(getAuth(req), id));
   });
 
   router.post('/:id/refunds', async (req, res) => {
-    const id = parseOrThrow(PaymentIdSchema, req.params['id']);
+    const id = parseOrThrow(PaymentIdSchema, req.params['id'], 'id');
     const input = parseOrThrow(RefundPaymentSchema, req.body);
     res.status(201).json(await service.refund(getAuth(req), id, input, idempotencyKey(req)));
   });
@@ -46,5 +46,5 @@ export function paymentRoutes(service: PaymentService): Router {
 function idempotencyKey(req: Request): string {
   const key = req.get('idempotency-key');
   if (key === undefined) throw Errors.idempotencyKeyRequired();
-  return parseOrThrow(IdempotencyKeySchema, key);
+  return parseOrThrow(IdempotencyKeySchema, key, 'Idempotency-Key');
 }

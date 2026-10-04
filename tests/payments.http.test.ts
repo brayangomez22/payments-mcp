@@ -19,7 +19,7 @@ describe('Payments HTTP API', () => {
     });
   }
 
-  const create = (body: unknown, key = crypto.randomUUID()) =>
+  const create = (body: unknown, key: string = crypto.randomUUID()) =>
     call('POST', '/api/v1/payments', { body, headers: { 'idempotency-key': key } });
 
   it('creates a payment with 201 and a Location header', async () => {
@@ -41,6 +41,12 @@ describe('Payments HTTP API', () => {
     const res = await call('POST', '/api/v1/payments', { body: { amountMinor: 100, currency: 'COP' } });
     assert.equal(res.status, 400);
     assert.equal((await res.json()).error.code, 'IDEMPOTENCY_KEY_REQUIRED');
+  });
+
+  it('names the header when the Idempotency-Key is too short', async () => {
+    const res = await create({ amountMinor: 100, currency: 'COP' }, 'short');
+    assert.equal(res.status, 400);
+    assert.equal((await res.json()).error.details[0].path, 'Idempotency-Key');
   });
 
   it('returns 422 when a key is reused with another body', async () => {
@@ -95,6 +101,7 @@ describe('Payments HTTP API', () => {
     assert.equal(foreign.status, 404);
     const bad = await call('GET', '/api/v1/payments/123');
     assert.equal(bad.status, 400);
+    assert.equal((await bad.json()).error.details[0].path, 'id');
   });
 
   it('rejects limit above 100', async () => {
