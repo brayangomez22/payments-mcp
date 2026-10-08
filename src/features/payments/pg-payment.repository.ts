@@ -1,4 +1,5 @@
 import type { Pool, Queryable } from '../../core/db/pool.js';
+import type { OutboxMessage } from '../../core/events/outbox.js';
 import { withTransaction } from '../../core/db/pool.js';
 import type { PaymentRepository, PaymentStore } from './payment.repository.js';
 import type { Currency, ListFilter, Payment, PaymentStatus, Refund } from './payment.types.js';
@@ -90,6 +91,10 @@ export class PgPaymentRepository implements PaymentRepository {
       'INSERT INTO refunds (id, payment_id, amount_minor, provider_ref, created_at) VALUES ($1, $2, $3, $4, $5)',
       [r.id, r.paymentId, r.amountMinor, r.providerRef, r.createdAt],
     );
+  }
+
+  async appendEvent(e: OutboxMessage): Promise<void> {
+    await this.db.query('INSERT INTO outbox (topic, payload) VALUES ($1, $2)', [e.topic, e.payload]);
   }
 
   private async findOne(sql: string, params: unknown[]): Promise<Payment | null> {

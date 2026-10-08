@@ -13,6 +13,8 @@
     "start": "node --env-file-if-exists=.env dist/server.js",
     "typecheck": "tsc --noEmit -p tsconfig.test.json",
     "db:up": "docker compose up -d --wait postgres",
+    "sqs:up": "docker compose up -d --wait localstack",
+    "sqs:peek": "node --env-file-if-exists=.env --import tsx scripts/sqs-peek.ts",
     "db:migrate": "node --env-file-if-exists=.env --import tsx src/db/migrate.ts",
     "test": "node --env-file-if-exists=.env --import tsx --test \"tests/**/*.test.ts\"",
     "test:cov": "node --env-file-if-exists=.env --import tsx --test --experimental-test-coverage --test-coverage-exclude=\"tests/**\" --test-coverage-lines=85 \"tests/**/*.test.ts\"",
@@ -21,6 +23,7 @@
     "demo:mcp-wire": "node --import tsx scripts/mcp-wire-demo.mts"
   },
   "dependencies": {
+    "@aws-sdk/client-sqs": "^3.1147.0",
     "@modelcontextprotocol/express": "^2.0.2",
     "@modelcontextprotocol/node": "^2.1.1",
     "@modelcontextprotocol/server": "^2.3.0",

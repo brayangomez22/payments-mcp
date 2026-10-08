@@ -65,6 +65,7 @@ CREATE TABLE outbox (
   id           BIGSERIAL PRIMARY KEY,
   topic        TEXT  NOT NULL,
   payload      JSONB NOT NULL,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),  -- para medir el retraso del relay
   published_at TIMESTAMPTZ
 );
 CREATE INDEX outbox_unpublished_idx ON outbox (id) WHERE published_at IS NULL;
@@ -164,6 +165,44 @@ expiran solas y no cargan la BD transaccional.
 Implementaciones: `FakeProvider` (determinista para tests: un monto terminado en `13` se rechaza y
 uno terminado en `99` produce timeout) y, en el futuro, un adaptador HTTP real con timeout de 5 s y
 reintentos con *backoff* solo para errores idempotentes.
+
+## Eventos (outbox + SQS)
+
+**Problema:** guardar el pago y publicar en SQS son dos sistemas distintos. Si se publica dentro del
+request y SQS falla, ¿se revierte el pago? (Requisito 6.2 dice que no). Si se publica después del
+`COMMIT` y el proceso muere en medio, el evento se pierde.
+
+**Solución — outbox transaccional:**
+
+1. Cada cambio de estado escribe una fila en `outbox` **con el mismo cliente/transacción** que el
+   `INSERT`/`UPDATE` del pago (`repo.appendEvent`). O se guardan los dos o ninguno.
+   - `create`: transacción 1 = pago `pending` + `payment.pending`; transacción 2 = resultado del
+     procesador + `payment.succeeded`/`payment.failed`. Si hubo timeout, solo existe el primero.
+   - `refund`: dentro de la transacción con `FOR UPDATE` → `payment.partially_refunded`/`payment.refunded`.
+   - Un *replay* idempotente no escribe eventos (devuelve la respuesta guardada).
+2. `OutboxRelay` (en cada pod) hace *polling* cada `OUTBOX_POLL_MS`:
+   `SELECT … WHERE published_at IS NULL ORDER BY id LIMIT 10 FOR UPDATE SKIP LOCKED` →
+   `SendMessageBatch` → `UPDATE … SET published_at = now()` solo para los ids que SQS aceptó.
+   - `SKIP LOCKED`: varios relays se reparten las filas en vez de esperarse.
+   - Lote máximo 10 (límite de SQS). Lote lleno y exitoso → siguiente pasada inmediata (backlog).
+   - Fallo parcial (`Failed` en la respuesta) o SQS caído → las filas quedan pendientes y se
+     reintentan; un SQS caído espera el intervalo para no martillarlo.
+
+**Garantías:**
+
+- **At-least-once:** si SQS aceptó el lote pero el `COMMIT` falla, se reenvía. Cada evento lleva un
+  `eventId` (UUID) para que el consumidor deduplique.
+- **Sin orden global:** SQS estándar y varios relays no garantizan orden. El consumidor usa
+  `occurredAt`/`status` (o se migra a SQS FIFO con `MessageGroupId = paymentId` si hiciera falta).
+- **Mensaje:** cuerpo JSON `{ eventId, type, paymentId, merchantId, status, requestId, occurredAt }`;
+  atributo `topic` para filtrar. La cola tiene DLQ (`maxReceiveCount = 5`).
+
+**Trade-off conocido:** el relay mantiene la transacción abierta mientras llama a SQS (timeout 5 s).
+Alternativa si escala: marcar filas con un *lease* (`locked_until`) y publicar fuera de la transacción.
+Limpieza de filas publicadas (job o particionado por fecha) queda pendiente.
+
+Local: `npm run sqs:up` (LocalStack 4.4 fijado; las imágenes ≥ 2026.03 piden `LOCALSTACK_AUTH_TOKEN`)
+y `npm run sqs:peek` para ver los mensajes.
 
 ## Manejo de errores
 

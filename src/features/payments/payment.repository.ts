@@ -1,3 +1,4 @@
+import type { OutboxMessage } from '../../core/events/outbox.js';
 import type { ListFilter, Payment, Refund } from './payment.types.js';
 
 export interface PaymentRepository {
@@ -9,6 +10,8 @@ export interface PaymentRepository {
   findByIdForUpdate(merchantId: string, id: string): Promise<Payment | null>;
   list(merchantId: string, filter: ListFilter): Promise<Payment[]>;
   insertRefund(refund: Refund): Promise<void>;
+  /** Writes an outbox event. Call it inside the transaction of the change it announces. */
+  appendEvent(event: OutboxMessage): Promise<void>;
 }
 
 /** Unit of work: `repo` for plain reads/writes, `withTransaction` for multi-step atomic changes. */

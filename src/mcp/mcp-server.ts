@@ -1,7 +1,7 @@
 import { McpServer } from '@modelcontextprotocol/server';
 import type { AuthContext, Scope } from '../core/auth/auth-context.js';
 import type { Logger } from '../core/logger.js';
-import type { PaymentService } from '../features/payments/payment.service.js';
+import type { MerchantContext, PaymentService } from '../features/payments/payment.service.js';
 import { runTool, toolSuccess } from './tool-result.js';
 import { schemas } from './tool-schemas.js';
 
@@ -10,6 +10,8 @@ export interface McpServerDeps {
   /** Verified caller, built per request: every tool runs as THIS merchant. */
   auth: AuthContext;
   logger: Logger;
+  /** The HTTP request's id: events emitted by a tool call carry it. */
+  requestId?: string;
 }
 
 const AMOUNT_NOTE =
@@ -19,7 +21,7 @@ const AMOUNT_NOTE =
  * A new server per request (stateless mode). Tools close over `auth`, so the model can never
  * choose which merchant it acts for: there is no merchant argument to manipulate.
  */
-export function buildMcpServer({ paymentService, auth, logger }: McpServerDeps): McpServer {
+export function buildMcpServer({ paymentService, auth, logger, requestId }: McpServerDeps): McpServer {
   const server = new McpServer(
     { name: 'payments-mcp', version: '0.1.0' },
     {
@@ -30,7 +32,7 @@ export function buildMcpServer({ paymentService, auth, logger }: McpServerDeps):
         AMOUNT_NOTE,
     },
   );
-  const merchant = { merchantId: auth.merchantId };
+  const merchant: MerchantContext = { merchantId: auth.merchantId, requestId };
   const log = logger.child({ mcpClient: auth.clientId });
   // A tool is only registered when the token carries its scope: tools/list shows exactly what this
   // caller may do. What the model cannot see, it cannot be tricked into calling.
@@ -46,7 +48,7 @@ export function buildMcpServer({ paymentService, auth, logger }: McpServerDeps):
 
 interface ToolDeps {
   paymentService: PaymentService;
-  merchant: { merchantId: string };
+  merchant: MerchantContext;
   log: Logger;
 }
 

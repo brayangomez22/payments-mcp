@@ -1,6 +1,9 @@
+import { SQSClient } from '@aws-sdk/client-sqs';
 import { buildApp } from './app.js';
 import { loadEnv } from './config/env.js';
 import { createPool } from './core/db/pool.js';
+import { OutboxRelay } from './core/events/outbox-relay.js';
+import { PgOutboxStore } from './core/events/pg-outbox-store.js';
 import { PgIdempotencyStore } from './core/idempotency/pg-idempotency-store.js';
 import { createLogger } from './core/logger.js';
 import { loadSigningKey } from './core/auth/signing-key.js';
@@ -11,6 +14,7 @@ import { TokenService } from './features/auth/token.service.js';
 import { PaymentService } from './features/payments/payment.service.js';
 import { PgPaymentStore } from './features/payments/pg-payment.repository.js';
 import { FakeProvider } from './integrations/provider/fake-provider.js';
+import { SqsEventPublisher } from './integrations/sqs/sqs-publisher.js';
 
 async function start(): Promise<void> {
   const env = loadEnv();
@@ -27,6 +31,22 @@ async function start(): Promise<void> {
     logger,
     providerTimeoutMs: env.PROVIDER_TIMEOUT_MS,
   });
+
+  // In EKS every pod runs a relay; FOR UPDATE SKIP LOCKED keeps them from publishing the same row.
+  let relay: OutboxRelay | undefined;
+  if (env.SQS_QUEUE_URL) {
+    // Short timeout: the relay holds a transaction open while it publishes.
+    const sqs = new SQSClient({ region: env.AWS_REGION, requestHandler: { requestTimeout: 5000 } });
+    relay = new OutboxRelay({
+      store: new PgOutboxStore(pool),
+      publisher: new SqsEventPublisher(sqs, env.SQS_QUEUE_URL),
+      logger: logger.child({ component: 'outbox-relay' }),
+      intervalMs: env.OUTBOX_POLL_MS,
+    });
+    relay.start();
+  } else {
+    logger.warn('SQS_QUEUE_URL not set: payment events stay in the outbox until a relay publishes them');
+  }
 
   const issuer = env.JWT_ISSUER ?? env.PUBLIC_BASE_URL.replace(/\/$/, '');
   const mcpResource = `${env.PUBLIC_BASE_URL.replace(/\/$/, '')}/mcp`;
@@ -59,11 +79,13 @@ async function start(): Promise<void> {
     logger.info(`payments-mcp listening on http://localhost:${env.PORT} (docs at /docs)`);
   });
 
-  // Graceful shutdown: stop accepting connections, let in-flight requests finish, then close the pool.
+  // Graceful shutdown: stop accepting connections, let in-flight requests finish, then stop the relay and close the pool.
   const shutdown = (signal: string): void => {
     logger.info({ signal }, 'shutting down');
     server.close(() => {
-      void pool.end().finally(() => process.exit(0));
+      void Promise.resolve(relay?.stop())
+        .then(() => pool.end())
+        .finally(() => process.exit(0));
     });
   };
   process.on('SIGINT', shutdown);

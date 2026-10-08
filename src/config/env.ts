@@ -16,6 +16,11 @@ const EnvSchema = v.object({
   TOKEN_TTL_SECONDS: v.optional(NumberFromString, '900'),
   /** Private JWK as JSON. Omit in dev to use an ephemeral key. */
   JWT_PRIVATE_JWK: v.optional(v.string()),
+  /** Queue for payment events. Omit to keep events in the outbox without publishing them. */
+  SQS_QUEUE_URL: v.optional(v.pipe(v.string(), v.url())),
+  /** The AWS SDK also reads AWS_ENDPOINT_URL (LocalStack) and the AWS_* credentials on its own. */
+  AWS_REGION: v.optional(v.string(), 'us-east-1'),
+  OUTBOX_POLL_MS: v.optional(NumberFromString, '1000'),
 });
 
 export type Env = v.InferOutput<typeof EnvSchema>;

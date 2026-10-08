@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { after, before, describe, it } from 'node:test';
 import { createPool, type Pool } from '../src/core/db/pool.js';
+import { PgOutboxStore } from '../src/core/events/pg-outbox-store.js';
 import { PgIdempotencyStore } from '../src/core/idempotency/pg-idempotency-store.js';
 import { migrate } from '../src/db/migrate.js';
 import { PaymentService } from '../src/features/payments/payment.service.js';
@@ -96,5 +97,58 @@ describe('Postgres integration', { skip: !reachable && 'DATABASE_URL not set or 
     // Key was released: the same request can be retried.
     const { rows } = await db.query('SELECT 1 FROM idempotency_keys WHERE key = $1', ['pg-rollback-ref']);
     assert.equal(rows.length, 0);
+  });
+
+  const eventsOf = async (paymentId: string) =>
+    (
+      await db.query<{ id: string; topic: string; published_at: Date | null }>(
+        "SELECT id, topic, published_at FROM outbox WHERE payload->>'paymentId' = $1 ORDER BY id",
+        [paymentId],
+      )
+    ).rows;
+
+  it('writes the outbox rows in the same transactions as the payment (6.1)', async () => {
+    const payment = await service.create({ ...merchant, requestId: 'pg-req' }, { amountMinor: 900, currency: 'COP' }, 'pg-outbox-1');
+    const rows = await eventsOf(payment.id);
+    assert.deepEqual(
+      rows.map((r) => r.topic),
+      ['payment.pending', 'payment.succeeded'],
+    );
+    assert.ok(rows.every((r) => r.published_at === null));
+  });
+
+  it('relays split pending rows with SKIP LOCKED and roll back on publish errors (6.2)', async () => {
+    const outbox = new PgOutboxStore(db);
+    const payment = await service.create(merchant, { amountMinor: 901, currency: 'COP' }, 'pg-outbox-2');
+    const mine = new Set((await eventsOf(payment.id)).map((r) => r.id));
+
+    await assert.rejects(
+      outbox.drain(1000, async () => {
+        throw new Error('SQS down');
+      }),
+    );
+    assert.ok((await eventsOf(payment.id)).every((r) => r.published_at === null), 'rolled back: still pending');
+
+    // Relay A holds its rows (transaction open) while relay B runs: B must get different rows, not wait.
+    let release!: () => void;
+    const held = new Promise<void>((r) => (release = r));
+    const claimedByA: string[] = [];
+    const a = outbox.drain(1, async (events) => {
+      claimedByA.push(...events.map((e) => e.id));
+      await held;
+      return events.map((e) => e.id);
+    });
+    while (claimedByA.length === 0) await new Promise((r) => setTimeout(r, 5));
+    const claimedByB: string[] = [];
+    await outbox.drain(1000, async (events) => {
+      claimedByB.push(...events.map((e) => e.id));
+      return events.map((e) => e.id);
+    });
+    release();
+    await a;
+
+    assert.ok(!claimedByB.some((id) => claimedByA.includes(id)), 'no row claimed twice');
+    const all = await eventsOf(payment.id);
+    assert.ok(all.every((r) => r.published_at !== null && mine.has(r.id)), 'every event published once');
   });
 });

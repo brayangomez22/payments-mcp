@@ -15,5 +15,21 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
 
+  localstack:
+    # Pinned: since 2026.03 the newer images need LOCALSTACK_AUTH_TOKEN (free Hobby plan).
+    # To use a current tag, set that variable here.
+    image: localstack/localstack:4.4
+    environment:
+      SERVICES: sqs
+    ports:
+      - "4566:4566"
+    volumes:
+      - ./localstack/init-sqs.sh:/etc/localstack/init/ready.d/init-sqs.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "awslocal sqs get-queue-url --queue-name payments-events"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
 volumes:
   pgdata:

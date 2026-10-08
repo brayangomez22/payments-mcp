@@ -4,7 +4,8 @@ import { fingerprint, runIdempotent, type IdempotencyStore } from '../../core/id
 import type { Logger } from '../../core/logger.js';
 import type { ChargeResult, PaymentProvider } from '../../integrations/provider/payment-provider.js';
 import { decodeCursor, encodeCursor } from './cursor.js';
-import type { PaymentStore } from './payment.repository.js';
+import { paymentStatusEvent } from './payment.events.js';
+import type { PaymentRepository, PaymentStore } from './payment.repository.js';
 import type { CreatePaymentInput, ListPaymentsInput, RefundPaymentInput } from './payment.schemas.js';
 import {
   REFUNDABLE_STATUSES,
@@ -20,6 +21,8 @@ import {
 
 export interface MerchantContext {
   merchantId: string;
+  /** Correlates the events a request produces with its logs. */
+  requestId?: string | undefined;
 }
 
 export interface PaymentServiceDeps {
@@ -91,7 +94,10 @@ export class PaymentService {
         updatedAt: now,
       };
       // Persist BEFORE calling the provider: if we crash mid-call, a pending row remains to reconcile.
-      await this.deps.store.repo.insert(payment);
+      await this.deps.store.withTransaction(async (repo) => {
+        await repo.insert(payment);
+        await this.recordTransition(repo, ctx, payment);
+      });
 
       const result = await this.charge(payment);
       if (!result) return toPaymentView(payment);
@@ -103,7 +109,10 @@ export class PaymentService {
         failureReason: result.status === 'failed' ? result.failureReason : null,
         updatedAt: this.clock(),
       };
-      await this.deps.store.repo.update(settled);
+      await this.deps.store.withTransaction(async (repo) => {
+        await repo.update(settled);
+        await this.recordTransition(repo, ctx, settled);
+      });
       return toPaymentView(settled);
     });
   }
@@ -160,6 +169,7 @@ export class PaymentService {
         const updated: Payment = { ...payment, refundedMinor: plan.refundedMinor, status: plan.status, updatedAt: now };
         await repo.insertRefund(refund);
         await repo.update(updated);
+        await this.recordTransition(repo, ctx, updated);
         return { refund: toRefundView(refund), payment: toPaymentView(updated) };
       }),
     );
@@ -179,6 +189,14 @@ export class PaymentService {
       statusAfter: plan.status,
       remainingAfterMinor: payment.amountMinor - plan.refundedMinor,
     };
+  }
+
+  /**
+   * Outbox write, on the same `repo` (same transaction) as the state change: both commit or neither
+   * does. Publishing to SQS happens later, in the relay, so a broker outage never rolls back a payment.
+   */
+  private recordTransition(repo: PaymentRepository, ctx: MerchantContext, payment: Payment): Promise<void> {
+    return repo.appendEvent(paymentStatusEvent(payment, ctx.requestId));
   }
 
   /** Returns null when the outcome is unknown (timeout/network): the payment stays pending. */

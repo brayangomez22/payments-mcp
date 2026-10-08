@@ -36,7 +36,7 @@ export function mcpRoutes({ paymentService, tokenVerifier, resource, authorizati
 
   // No valid token → 401 whose WWW-Authenticate points at the metadata above.
   router.post('/mcp', authenticate(tokenVerifier, { resourceMetadataUrl }), async (req, res) => {
-    const server = buildMcpServer({ paymentService, auth: getAuth(req), logger: req.log });
+    const server = buildMcpServer({ paymentService, auth: getAuth(req), logger: req.log, requestId: req.requestId });
     // Stateless: no Mcp-Session-Id, so any pod can serve any request (no sticky sessions in EKS).
     const transport = new NodeStreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
     res.on('close', () => {

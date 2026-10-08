@@ -9,14 +9,14 @@ import {
   PaymentIdSchema,
   RefundPaymentSchema,
 } from './payment.schemas.js';
-import type { PaymentService } from './payment.service.js';
+import type { MerchantContext, PaymentService } from './payment.service.js';
 
 export function paymentRoutes(service: PaymentService): Router {
   const router = Router();
 
   router.post('/', requireScope('payments:write'), async (req, res) => {
     const input = parseOrThrow(CreatePaymentSchema, req.body);
-    const payment = await service.create(getAuth(req), input, idempotencyKey(req));
+    const payment = await service.create(merchantOf(req), input, idempotencyKey(req));
     // 202: accepted but the provider outcome is still unknown.
     res
       .status(payment.status === 'pending' ? 202 : 201)
@@ -37,7 +37,7 @@ export function paymentRoutes(service: PaymentService): Router {
   router.post('/:id/refunds', requireScope('payments:refund'), async (req, res) => {
     const id = parseOrThrow(PaymentIdSchema, req.params['id'], 'id');
     const input = parseOrThrow(RefundPaymentSchema, req.body);
-    res.status(201).json(await service.refund(getAuth(req), id, input, idempotencyKey(req)));
+    res.status(201).json(await service.refund(merchantOf(req), id, input, idempotencyKey(req)));
   });
 
   return router;
@@ -47,4 +47,8 @@ function idempotencyKey(req: Request): string {
   const key = req.get('idempotency-key');
   if (key === undefined) throw Errors.idempotencyKeyRequired();
   return parseOrThrow(IdempotencyKeySchema, key, 'Idempotency-Key');
+}
+
+function merchantOf(req: Request): MerchantContext {
+  return { merchantId: getAuth(req).merchantId, requestId: req.requestId };
 }

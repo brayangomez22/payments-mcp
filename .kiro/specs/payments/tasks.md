@@ -36,9 +36,9 @@
   - [x] 6.3 Tests con el `Client` del SDK
   - _Requisitos: 5.1–5.6_
 
-- [ ] 7. Eventos
-  - [ ] 7.1 Outbox en la misma transacción del cambio de estado
-  - [ ] 7.2 Relay a SQS (LocalStack)
+- [x] 7. Eventos
+  - [x] 7.1 Outbox en la misma transacción del cambio de estado
+  - [x] 7.2 Relay a SQS (LocalStack) con `FOR UPDATE SKIP LOCKED` y fallos parciales de lote
   - _Requisitos: 6.1–6.2_
 
 - [ ] 8. Observabilidad

@@ -1,3 +1,4 @@
+import type { OutboxMessage } from '../../src/core/events/outbox.js';
 import type { BeginResult, IdempotencyScope, IdempotencyStore } from '../../src/core/idempotency/idempotency.js';
 import type { PaymentRepository, PaymentStore } from '../../src/features/payments/payment.repository.js';
 import type { ListFilter, Payment, Refund } from '../../src/features/payments/payment.types.js';
@@ -6,6 +7,7 @@ class InMemoryPaymentRepository implements PaymentRepository {
   constructor(
     readonly payments: Map<string, Payment>,
     readonly refunds: Refund[],
+    readonly events: OutboxMessage[],
   ) {}
 
   async insert(p: Payment): Promise<void> {
@@ -36,13 +38,17 @@ class InMemoryPaymentRepository implements PaymentRepository {
   async insertRefund(r: Refund): Promise<void> {
     this.refunds.push({ ...r });
   }
+  async appendEvent(e: OutboxMessage): Promise<void> {
+    this.events.push(structuredClone(e));
+  }
 }
 
 /** Transactions are serialized through a promise chain, mimicking the row lock. No rollback. */
 export class InMemoryPaymentStore implements PaymentStore {
   readonly payments = new Map<string, Payment>();
   readonly refunds: Refund[] = [];
-  readonly repo = new InMemoryPaymentRepository(this.payments, this.refunds);
+  readonly events: OutboxMessage[] = [];
+  readonly repo = new InMemoryPaymentRepository(this.payments, this.refunds, this.events);
   private queue: Promise<unknown> = Promise.resolve();
 
   withTransaction<T>(fn: (repo: PaymentRepository) => Promise<T>): Promise<T> {
