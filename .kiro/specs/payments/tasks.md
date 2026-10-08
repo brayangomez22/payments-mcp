@@ -48,4 +48,4 @@
 
 - [x] 9. Agente demo con Anthropic SDK que consume `/mcp` (`npm run demo:agent`; aprobación humana en el host para tools destructivas)
 
-- [ ] 10. Terraform básico (SQS, DynamoDB con TTL, esqueleto de EKS)
+- [x] 10. Terraform básico (SQS + DLQ, DynamoDB con TTL, VPC + esqueleto de EKS, rol IAM por Pod Identity) — `npm run tf:validate`

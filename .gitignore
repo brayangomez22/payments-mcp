@@ -2,3 +2,9 @@ node_modules/
 dist/
 coverage/
 .env
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+terraform.tfvars

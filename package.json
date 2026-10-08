@@ -22,6 +22,7 @@
     "test:cov": "node --env-file-if-exists=.env --import tsx --test --experimental-test-coverage --test-coverage-exclude=\"tests/**\" --test-coverage-lines=85 \"tests/**/*.test.ts\"",
     "demo:explain": "node scripts/explain-demo.mjs",
     "hash-secret": "node --import tsx scripts/hash-secret.ts",
+    "tf:validate": "terraform -chdir=infra/terraform init -backend=false -input=false && terraform -chdir=infra/terraform fmt -check && terraform -chdir=infra/terraform validate",
     "demo:agent": "node --env-file-if-exists=.env --import tsx scripts/agent-demo.ts",
     "demo:mcp-wire": "node --import tsx scripts/mcp-wire-demo.mts"
   },

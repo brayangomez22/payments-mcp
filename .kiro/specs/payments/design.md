@@ -259,6 +259,27 @@ Local: `npm run obs:up` → app en `:3000`, Grafana en `:3001`, Prometheus en `:
   `fallbacks: "default"` (beta `server-side-fallback-2026-07-01`) por si un clasificador rechaza.
 - **Tests sin API key:** un Claude "guionado" (respuestas fijas) contra el servidor MCP real de pruebas.
 
+## Infraestructura AWS (Terraform)
+
+`infra/terraform/` — un solo *root module*; el entorno se elige con `environment` en `terraform.tfvars`.
+
+| Archivo | Qué crea | Decisiones |
+|---|---|---|
+| `sqs.tf` | Cola `events` + DLQ | Igual que LocalStack: DLQ con `maxReceiveCount = 5`, cifrado SSE, *long polling* 20 s, DLQ solo usable por esa cola (`redrive_allow_policy`) |
+| `dynamodb.tf` | Tabla `idempotency` | `pk = MERCHANT#<id>`, `sk = KEY#<key>`, `PAY_PER_REQUEST`, TTL en `expires_at` (epoch en segundos), PITR, *deletion protection* en prod |
+| `network.tf` | VPC con 3 AZ | Nodos en subredes privadas; 1 NAT fuera de prod (costo), 1 por AZ en prod (disponibilidad); tags para el Load Balancer Controller |
+| `eks.tf` | Control plane + node group gestionado | Módulos oficiales `terraform-aws-modules` (vpc 6.x, eks 21.x), addons `vpc-cni`, `coredns`, `kube-proxy`, `eks-pod-identity-agent`; endpoint público solo fuera de prod |
+| `iam.tf` | Rol de la app + Pod Identity | Mínimo privilegio: `sqs:SendMessage` en la cola, `Get/Put/Update/DeleteItem` en la tabla. Sin llaves AWS en el cluster |
+
+- **Estado remoto:** backend S3 comentado con `use_lockfile = true` (Terraform ≥ 1.10 bloquea con un
+  archivo en el bucket, sin tabla DynamoDB de locks).
+- **Validación:** `terraform fmt -check` + `terraform validate` (`npm run tf:validate`). No se ha hecho
+  `plan`/`apply` contra una cuenta real.
+- **Costo de referencia (dev):** EKS ~73 USD/mes por el control plane + 2 × t3.medium + 1 NAT. SQS y
+  DynamoDB bajo demanda cuestan casi nada con poco tráfico. **Destruir con `terraform destroy` al terminar.**
+- **Fuera de alcance:** RDS para Postgres, manifests/Helm de la app, AWS Load Balancer Controller,
+  y el adaptador `DynamoIdempotencyStore` (la tabla existe; la app sigue usando Postgres).
+
 ## Manejo de errores
 
 Formato único: `{ "error": { "code": "PAYMENT_NOT_FOUND", "message": "…", "requestId": "…" } }`.
