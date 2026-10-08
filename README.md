@@ -29,7 +29,7 @@ flowchart LR
 |---|---|---|
 | **Pagos** | Cobros y reembolsos con máquina de estados; montos enteros en unidades menores | `src/features/payments/` |
 | **Idempotencia** | `Idempotency-Key`: un reintento nunca cobra dos veces (REST y MCP comparten la misma) | `src/core/idempotency/` |
-| **PostgreSQL** | SQL explícito, paginación por cursor (keyset), `SELECT … FOR UPDATE` contra reembolsos concurrentes | `db/migrations/`, `docs/estudio/04-indices-y-explain.md` |
+| **PostgreSQL** | SQL explícito, paginación por cursor (keyset), `SELECT … FOR UPDATE` contra reembolsos concurrentes | `db/migrations/` |
 | **Auth** | OAuth2 *client credentials*, JWT ES256 + JWKS, scopes por ruta | `src/core/auth/`, `src/features/auth/` |
 | **MCP** | Streamable HTTP sin estado, autorización según la spec MCP (Protected Resource Metadata), tools filtradas por scope, reembolso en dos pasos (vista previa → `confirm: true`) | `src/mcp/` |
 | **Eventos** | Outbox transaccional + relay a SQS con `FOR UPDATE SKIP LOCKED`, entrega *at-least-once* | `src/core/events/` |
@@ -72,27 +72,3 @@ Están en [`client-registry.ts`](src/features/auth/client-registry.ts) y **solo 
 | `tienda-a-backend` | `dev-secret-tienda-a` | read, write, refund |
 | `tienda-a-agent` | `dev-secret-agent-a` | read, write (**no** puede reembolsar) |
 | `tienda-b-backend` | `dev-secret-tienda-b` | read, write, refund (otro comercio) |
-
-## Estado y verificación
-
-- **111 tests y ~95 % de cobertura de líneas.** La suite de integración con Postgres se salta si no hay
-  base de datos disponible.
-- **Probado en local:** API, MCP, outbox, métricas y el loop del agente. Este último con un Claude
-  "guionado" (respuestas fijas), que no gasta llamadas a la API.
-- **Escrito pero sin probar de punta a punta:** el stack de Docker (LocalStack, Prometheus, Loki,
-  Grafana), el agente contra la API real de Claude y Terraform contra una cuenta de AWS (solo se
-  corrió `validate`).
-- **Pendiente:**
-  - Llevar la idempotencia a DynamoDB (la tabla ya está en Terraform).
-  - Conciliar los pagos que quedan `pending`.
-  - Manifests o Helm para desplegar en EKS.
-  - RDS.
-  - ESLint.
-
-Las limitaciones conocidas están en [`design.md`](.kiro/specs/payments/design.md). Por ejemplo, la
-llamada al procesador ocurre dentro de la transacción del reembolso.
-
-## Guías de estudio
-
-[`docs/estudio/`](docs/estudio/) explica cada decisión en lenguaje simple, con preguntas de entrevista:
-índices y `EXPLAIN`, preparación por bloques, observabilidad, el agente y Terraform.
