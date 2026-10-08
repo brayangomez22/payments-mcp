@@ -41,9 +41,9 @@
   - [x] 7.2 Relay a SQS (LocalStack) con `FOR UPDATE SKIP LOCKED` y fallos parciales de lote
   - _Requisitos: 6.1–6.2_
 
-- [ ] 8. Observabilidad
-  - [ ] 8.1 `/metrics` con prom-client, `/health/*`
-  - [ ] 8.2 Prometheus + Loki + Grafana en docker-compose
+- [x] 8. Observabilidad
+  - [x] 8.1 `/metrics` con prom-client (RED por ruta, `payments_total`, `mcp_tool_calls_total`, outbox), `/health/*`
+  - [x] 8.2 Dockerfile + Prometheus (con alertas) + Loki + Alloy + Grafana (dashboard provisionado) en docker-compose
   - _Requisitos: 7.1–7.3_
 
 - [ ] 9. Agente demo con Anthropic SDK que consume `/mcp`

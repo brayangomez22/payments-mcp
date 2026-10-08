@@ -4,6 +4,7 @@ import { authenticate } from './core/auth/authenticate.js';
 import { errorHandler, notFoundHandler } from './core/http/error-handler.js';
 import { requestContext } from './core/http/request-context.js';
 import type { Logger } from './core/logger.js';
+import { rememberMountPath, type Metrics } from './core/metrics.js';
 import type { SigningKey } from './core/auth/signing-key.js';
 import type { TokenVerifier } from './core/auth/token-verifier.js';
 import { openApiDocument } from './docs/openapi.js';
@@ -28,12 +29,14 @@ export interface AppDeps {
   mcpResource: string;
   /** Throws if a dependency (DB) is not reachable. */
   checkReadiness: () => Promise<void>;
+  metrics: Metrics;
 }
 
 export function buildApp(deps: AppDeps): Express {
   const app = express();
   app.disable('x-powered-by');
   app.use(requestContext(deps.logger));
+  app.use(deps.metrics.httpMiddleware());
   app.use(express.json({ limit: '100kb' }));
 
   // Liveness: the process is up. Readiness: it can serve traffic (k8s stops routing to it otherwise).
@@ -50,19 +53,25 @@ export function buildApp(deps: AppDeps): Express {
     }
   });
 
+  // Scraped by Prometheus. In EKS keep it off the public Ingress (internal port or NetworkPolicy).
+  app.get('/metrics', async (_req, res) => {
+    res.type(deps.metrics.registry.contentType).send(await deps.metrics.registry.metrics());
+  });
+
   app.get('/openapi.json', (_req, res) => {
     res.json(openApiDocument);
   });
   app.use('/docs', swaggerUi.serve, swaggerUi.setup(openApiDocument));
 
   app.use(authRoutes(deps.tokenService, deps.signingKey, deps.issuer));
-  app.use('/api/v1/payments', authenticate(deps.tokenVerifier), paymentRoutes(deps.paymentService));
+  app.use('/api/v1/payments', rememberMountPath, authenticate(deps.tokenVerifier), paymentRoutes(deps.paymentService));
   app.use(
     mcpRoutes({
       paymentService: deps.paymentService,
       tokenVerifier: deps.mcpTokenVerifier,
       resource: deps.mcpResource,
       authorizationServer: deps.issuer,
+      metrics: deps.metrics,
     }),
   );
 

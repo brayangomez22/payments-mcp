@@ -6,13 +6,14 @@ import { JwtVerifier } from '../../src/core/auth/token-verifier.js';
 import { DEV_CLIENTS, InMemoryClientRegistry } from '../../src/features/auth/client-registry.js';
 import { TokenService } from '../../src/features/auth/token.service.js';
 import { createLogger } from '../../src/core/logger.js';
+import { Metrics } from '../../src/core/metrics.js';
 import { PaymentService } from '../../src/features/payments/payment.service.js';
 import { FakeProvider } from '../../src/integrations/provider/fake-provider.js';
 import { InMemoryIdempotencyStore, InMemoryPaymentStore } from './in-memory.js';
 
 export const silentLogger = createLogger('silent');
 
-export function createService(overrides: { providerTimeoutMs?: number; clock?: () => Date } = {}) {
+export function createService(overrides: { providerTimeoutMs?: number; clock?: () => Date; metrics?: Metrics } = {}) {
   const store = new InMemoryPaymentStore();
   const idempotency = new InMemoryIdempotencyStore();
   const provider = new FakeProvider();
@@ -23,6 +24,7 @@ export function createService(overrides: { providerTimeoutMs?: number; clock?: (
     logger: silentLogger,
     providerTimeoutMs: overrides.providerTimeoutMs ?? 50,
     ...(overrides.clock ? { clock: overrides.clock } : {}),
+    ...(overrides.metrics ? { metrics: overrides.metrics } : {}),
   });
   return { service, store, idempotency, provider };
 }
@@ -51,7 +53,8 @@ export async function startTestServer(options: { ready?: () => Promise<void> } =
   const issuer = baseUrl;
   const mcpResource = `${baseUrl}/mcp`;
 
-  const ctx = createService({ clock: tickingClock() });
+  const metrics = new Metrics({ defaultMetrics: false });
+  const ctx = createService({ clock: tickingClock(), metrics });
   const signingKey = await loadSigningKey();
   const tokenService = new TokenService(new InMemoryClientRegistry(DEV_CLIENTS), signingKey, {
     issuer,
@@ -71,12 +74,14 @@ export async function startTestServer(options: { ready?: () => Promise<void> } =
       mcpTokenVerifier: verifierFor(mcpResource),
       issuer,
       mcpResource,
+      metrics,
       checkReadiness: options.ready ?? (async () => undefined),
     }),
   );
 
   return {
     ...ctx,
+    metrics,
     signingKey,
     issuer,
     mcpResource,

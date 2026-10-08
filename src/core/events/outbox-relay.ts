@@ -1,4 +1,5 @@
 import type { Logger } from '../logger.js';
+import type { Metrics } from '../metrics.js';
 import type { DrainResult, EventPublisher, OutboxStore } from './outbox.js';
 
 /** SendMessageBatch accepts at most 10 entries. */
@@ -10,6 +11,7 @@ export interface OutboxRelayDeps {
   logger: Logger;
   intervalMs: number;
   batchSize?: number;
+  metrics?: Pick<Metrics, 'eventsPublished' | 'relayError'> | undefined;
 }
 
 /** Polls the outbox and forwards pending events to the publisher. Failures are retried, never lost. */
@@ -26,6 +28,7 @@ export class OutboxRelay {
   /** One pass over the outbox. Throws if the database or the broker fails. */
   async runOnce(): Promise<DrainResult> {
     const result = await this.deps.store.drain(this.batchSize, (events) => this.deps.publisher.publish(events));
+    this.deps.metrics?.eventsPublished(result.published);
     if (result.published < result.claimed) {
       this.deps.logger.warn(result, 'some outbox events were not accepted by the broker; they will be retried');
     }
@@ -59,6 +62,7 @@ export class OutboxRelay {
       // Partial or failed batches wait the interval, so a broken broker is not hammered.
       backlog = (await this.runOnce()).published === this.batchSize;
     } catch (err) {
+      this.deps.metrics?.relayError();
       this.deps.logger.error({ err }, 'outbox relay pass failed');
     }
     this.schedule(backlog ? 0 : this.deps.intervalMs);

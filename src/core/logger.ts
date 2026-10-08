@@ -8,6 +8,8 @@ export function createLogger(level: string): Logger {
     level,
     base: { service: 'payments-mcp' },
     timestamp: pino.stdTimeFunctions.isoTime,
+    // "level":"error" instead of 50: readable in Loki ({...} | json | level="error") and by humans.
+    formatters: { level: (label) => ({ level: label }) },
     redact: ['headers.authorization', 'headers.cookie'],
   });
 }

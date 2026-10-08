@@ -5,6 +5,12 @@ import type { DrainResult, OutboxEvent, OutboxStore } from './outbox.js';
 export class PgOutboxStore implements OutboxStore {
   constructor(private readonly pool: Pool) {}
 
+  async countPending(): Promise<number> {
+    // Served by the partial index outbox_unpublished_idx.
+    const { rows } = await this.pool.query<{ n: number }>('SELECT count(*)::int AS n FROM outbox WHERE published_at IS NULL');
+    return rows[0]?.n ?? 0;
+  }
+
   drain(limit: number, publish: (events: OutboxEvent[]) => Promise<string[]>): Promise<DrainResult> {
     return withTransaction(this.pool, async (client) => {
       // SKIP LOCKED: several relays (one per pod) split the pending rows instead of waiting on each other.

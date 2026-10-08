@@ -31,5 +31,71 @@ services:
       timeout: 5s
       retries: 30
 
+  # ---- docker compose --profile app --profile obs up (npm run obs:up) ----
+
+  app:
+    profiles: [app]
+    build: .
+    environment:
+      DATABASE_URL: postgres://payments:payments@postgres:5432/payments
+      PUBLIC_BASE_URL: http://localhost:3000
+      SQS_QUEUE_URL: http://localstack:4566/000000000000/payments-events
+      AWS_ENDPOINT_URL: http://localstack:4566
+      AWS_REGION: us-east-1
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+    ports:
+      - "3000:3000"
+    depends_on:
+      postgres: { condition: service_healthy }
+      localstack: { condition: service_healthy }
+    healthcheck:
+      # The same probe k8s would use for readiness.
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/health/ready || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  prometheus:
+    profiles: [obs]
+    image: prom/prometheus:v3.5.0
+    volumes:
+      - ./observability/prometheus:/etc/prometheus:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway" # lets it scrape npm run dev on Linux too
+    ports:
+      - "9090:9090"
+
+  loki:
+    profiles: [obs]
+    image: grafana/loki:3.5.0
+    command: -config.file=/etc/loki/local-config.yaml
+    ports:
+      - "3100:3100"
+
+  alloy:
+    profiles: [obs]
+    image: grafana/alloy:v1.10.0
+    command: run /etc/alloy/config.alloy
+    volumes:
+      - ./observability/alloy/config.alloy:/etc/alloy/config.alloy:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    depends_on: [loki]
+
+  grafana:
+    profiles: [obs]
+    image: grafana/grafana:12.1.0
+    environment:
+      # Local only: no login. Never do this outside your machine.
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+      GF_AUTH_DISABLE_LOGIN_FORM: "true"
+    volumes:
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - "3001:3000"
+    depends_on: [prometheus, loki]
+
 volumes:
   pgdata:

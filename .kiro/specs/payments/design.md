@@ -204,6 +204,37 @@ Limpieza de filas publicadas (job o particionado por fecha) queda pendiente.
 Local: `npm run sqs:up` (LocalStack 4.4 fijado; las imágenes ≥ 2026.03 piden `LOCALSTACK_AUTH_TOKEN`)
 y `npm run sqs:peek` para ver los mensajes.
 
+## Observabilidad
+
+| Señal | Implementación | Responde |
+|---|---|---|
+| Métricas | `prom-client` en `/metrics` (registro propio, `src/core/metrics.ts`) → Prometheus (pull, cada 5 s en local) | ¿Algo anda mal? |
+| Logs | pino JSON a stdout → Alloy lee el stdout del contenedor → Loki | ¿Qué pasó exactamente? |
+| Dashboards y alertas | Grafana con datasources y dashboard provisionados; reglas en `observability/prometheus/alerts.yml` | Todo junto |
+
+**Métricas (Requisito 7.1):**
+
+- `http_request_duration_seconds{method, route, status_code}` (histogram): su `_count` es el contador de
+  requests, así que cubre las tres letras de RED. `route` es el **patrón** (`/api/v1/payments/:id`),
+  nunca la URL; sin ruta → `<prefijo>/*` (p. ej. 401 antes del router) o `unmatched`.
+  - Trampa de Express: si el handler lanza, Express restaura `req.baseUrl` antes del error handler. Por
+    eso `rememberMountPath` guarda el prefijo en `res.locals` mientras la petición está dentro del router.
+- `payments_total{status}`: transiciones de estado, contadas **después del COMMIT**.
+- `mcp_tool_calls_total{tool, outcome}` con `outcome ∈ ok | domain_error | internal_error`.
+- `outbox_pending_events` (gauge leído en cada scrape con el índice parcial), `outbox_events_published_total`,
+  `outbox_relay_errors_total`.
+- Métricas por defecto de Node (CPU, memoria, event loop lag, GC).
+
+**Logs (7.2):** `level` como texto (`"warn"`), `requestId` en cada línea, `authorization`/`cookie`
+redactados. En Loki solo `app` y `level` son *labels*; `requestId` se busca al consultar
+(`{app="payments-mcp"} | json | requestId="…"`), porque como label tendría cardinalidad ilimitada.
+
+**Alertas:** 5xx > 5 % por 5 min, p95 > 1 s por 10 min, outbox > 100 pendientes por 5 min.
+
+`/metrics` no lleva auth: en EKS se expone en la red interna (NetworkPolicy o puerto aparte), no en el Ingress.
+
+Local: `npm run obs:up` → app en `:3000`, Grafana en `:3001`, Prometheus en `:9090`.
+
 ## Manejo de errores
 
 Formato único: `{ "error": { "code": "PAYMENT_NOT_FOUND", "message": "…", "requestId": "…" } }`.

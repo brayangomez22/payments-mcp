@@ -1,0 +1,29 @@
+groups:
+  - name: payments-mcp
+    rules:
+      # E of RED: more than 5 % of requests are failing on our side.
+      - alert: PaymentsHighErrorRate
+        expr: |
+          sum(rate(http_request_duration_seconds_count{status_code=~"5.."}[5m]))
+            / sum(rate(http_request_duration_seconds_count[5m])) > 0.05
+        for: 5m
+        labels: { severity: page }
+        annotations:
+          summary: More than 5 % of requests return 5xx
+
+      # D of RED: the slowest 5 % of requests take more than 1 s (the provider call is the usual suspect).
+      - alert: PaymentsHighLatencyP95
+        expr: |
+          histogram_quantile(0.95, sum by (le, route) (rate(http_request_duration_seconds_bucket[5m]))) > 1
+        for: 10m
+        labels: { severity: ticket }
+        annotations:
+          summary: 'p95 latency above 1 s on {{ $labels.route }}'
+
+      # Events are stuck: SQS down or the relay is not running. Payments still work, webhooks do not.
+      - alert: OutboxBacklog
+        expr: max(outbox_pending_events) > 100
+        for: 5m
+        labels: { severity: ticket }
+        annotations:
+          summary: '{{ $value }} payment events waiting in the outbox'

@@ -6,6 +6,7 @@ import { OutboxRelay } from './core/events/outbox-relay.js';
 import { PgOutboxStore } from './core/events/pg-outbox-store.js';
 import { PgIdempotencyStore } from './core/idempotency/pg-idempotency-store.js';
 import { createLogger } from './core/logger.js';
+import { Metrics } from './core/metrics.js';
 import { loadSigningKey } from './core/auth/signing-key.js';
 import { JwtVerifier } from './core/auth/token-verifier.js';
 import { migrate } from './db/migrate.js';
@@ -24,7 +25,9 @@ async function start(): Promise<void> {
   const applied = await migrate(pool);
   if (applied.length) logger.info({ applied }, 'migrations applied');
 
+  const metrics = new Metrics();
   const paymentService = new PaymentService({
+    metrics,
     store: new PgPaymentStore(pool),
     idempotency: new PgIdempotencyStore(pool),
     provider: new FakeProvider(),
@@ -33,12 +36,15 @@ async function start(): Promise<void> {
   });
 
   // In EKS every pod runs a relay; FOR UPDATE SKIP LOCKED keeps them from publishing the same row.
+  const outbox = new PgOutboxStore(pool);
+  metrics.trackOutboxBacklog(() => outbox.countPending());
   let relay: OutboxRelay | undefined;
   if (env.SQS_QUEUE_URL) {
     // Short timeout: the relay holds a transaction open while it publishes.
     const sqs = new SQSClient({ region: env.AWS_REGION, requestHandler: { requestTimeout: 5000 } });
     relay = new OutboxRelay({
-      store: new PgOutboxStore(pool),
+      store: outbox,
+      metrics,
       publisher: new SqsEventPublisher(sqs, env.SQS_QUEUE_URL),
       logger: logger.child({ component: 'outbox-relay' }),
       intervalMs: env.OUTBOX_POLL_MS,
@@ -70,6 +76,7 @@ async function start(): Promise<void> {
     mcpTokenVerifier: verifierFor(mcpResource),
     issuer,
     mcpResource,
+    metrics,
     checkReadiness: async () => {
       await pool.query('SELECT 1');
     },

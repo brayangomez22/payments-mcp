@@ -32,6 +32,8 @@ export interface PaymentServiceDeps {
   logger: Logger;
   providerTimeoutMs: number;
   clock?: () => Date;
+  /** Counts committed status changes (payments_total). */
+  metrics?: { paymentStatus(status: PaymentStatus): void };
 }
 
 export interface RefundPreview {
@@ -98,6 +100,7 @@ export class PaymentService {
         await repo.insert(payment);
         await this.recordTransition(repo, ctx, payment);
       });
+      this.deps.metrics?.paymentStatus(payment.status);
 
       const result = await this.charge(payment);
       if (!result) return toPaymentView(payment);
@@ -113,6 +116,7 @@ export class PaymentService {
         await repo.update(settled);
         await this.recordTransition(repo, ctx, settled);
       });
+      this.deps.metrics?.paymentStatus(settled.status);
       return toPaymentView(settled);
     });
   }
@@ -146,8 +150,8 @@ export class PaymentService {
       key: idempotencyKey,
       fingerprint: fingerprint('refund_payment', { paymentId, ...input }),
     };
-    return runIdempotent(this.deps.idempotency, scope, () =>
-      this.deps.store.withTransaction(async (repo) => {
+    return runIdempotent(this.deps.idempotency, scope, async () => {
+      const outcome = await this.deps.store.withTransaction(async (repo) => {
         // Row lock: two concurrent refunds on the same payment are serialized here.
         const payment = await repo.findByIdForUpdate(ctx.merchantId, paymentId);
         if (!payment) throw Errors.paymentNotFound();
@@ -171,8 +175,11 @@ export class PaymentService {
         await repo.update(updated);
         await this.recordTransition(repo, ctx, updated);
         return { refund: toRefundView(refund), payment: toPaymentView(updated) };
-      }),
-    );
+      });
+      // Counted after COMMIT: a rolled-back refund must not show up in the dashboard.
+      this.deps.metrics?.paymentStatus(outcome.payment.status);
+      return outcome;
+    });
   }
 
   /**

@@ -2,7 +2,8 @@ import { McpServer } from '@modelcontextprotocol/server';
 import type { AuthContext, Scope } from '../core/auth/auth-context.js';
 import type { Logger } from '../core/logger.js';
 import type { MerchantContext, PaymentService } from '../features/payments/payment.service.js';
-import { runTool, toolSuccess } from './tool-result.js';
+import type { Metrics } from '../core/metrics.js';
+import { runTool, toolSuccess, type ToolContext } from './tool-result.js';
 import { schemas } from './tool-schemas.js';
 
 export interface McpServerDeps {
@@ -12,6 +13,7 @@ export interface McpServerDeps {
   logger: Logger;
   /** The HTTP request's id: events emitted by a tool call carry it. */
   requestId?: string;
+  metrics?: Metrics | undefined;
 }
 
 const AMOUNT_NOTE =
@@ -21,7 +23,7 @@ const AMOUNT_NOTE =
  * A new server per request (stateless mode). Tools close over `auth`, so the model can never
  * choose which merchant it acts for: there is no merchant argument to manipulate.
  */
-export function buildMcpServer({ paymentService, auth, logger, requestId }: McpServerDeps): McpServer {
+export function buildMcpServer({ paymentService, auth, logger, requestId, metrics }: McpServerDeps): McpServer {
   const server = new McpServer(
     { name: 'payments-mcp', version: '0.1.0' },
     {
@@ -38,7 +40,7 @@ export function buildMcpServer({ paymentService, auth, logger, requestId }: McpS
   // caller may do. What the model cannot see, it cannot be tricked into calling.
   const can = (scope: Scope): boolean => auth.scopes.has(scope);
 
-  const deps = { paymentService, merchant, log };
+  const deps: ToolDeps = { paymentService, merchant, tool: { log, metrics } };
   if (can('payments:read')) registerReadTools(server, deps);
   if (can('payments:write')) registerCreatePayment(server, deps);
   if (can('payments:refund')) registerRefundPayment(server, deps);
@@ -49,10 +51,10 @@ export function buildMcpServer({ paymentService, auth, logger, requestId }: McpS
 interface ToolDeps {
   paymentService: PaymentService;
   merchant: MerchantContext;
-  log: Logger;
+  tool: ToolContext;
 }
 
-function registerReadTools(server: McpServer, { paymentService, merchant, log }: ToolDeps): void {
+function registerReadTools(server: McpServer, { paymentService, merchant, tool }: ToolDeps): void {
   server.registerTool(
     'get_payment',
     {
@@ -65,7 +67,7 @@ function registerReadTools(server: McpServer, { paymentService, merchant, log }:
       outputSchema: schemas.paymentOutput,
       annotations: { readOnlyHint: true, openWorldHint: false },
     },
-    ({ paymentId }) => runTool(log, 'get_payment', async () => toolSuccess(await paymentService.get(merchant, paymentId))),
+    ({ paymentId }) => runTool(tool, 'get_payment', async () => toolSuccess(await paymentService.get(merchant, paymentId))),
   );
 
   server.registerTool(
@@ -80,13 +82,13 @@ function registerReadTools(server: McpServer, { paymentService, merchant, log }:
       annotations: { readOnlyHint: true, openWorldHint: false },
     },
     ({ status, limit, cursor }) =>
-      runTool(log, 'list_payments', async () =>
+      runTool(tool, 'list_payments', async () =>
         toolSuccess(await paymentService.list(merchant, { limit: limit ?? 20, ...(status ? { status } : {}), ...(cursor ? { cursor } : {}) })),
       ),
   );
 }
 
-function registerCreatePayment(server: McpServer, { paymentService, merchant, log }: ToolDeps): void {
+function registerCreatePayment(server: McpServer, { paymentService, merchant, tool }: ToolDeps): void {
   server.registerTool(
     'create_payment',
     {
@@ -102,11 +104,11 @@ function registerCreatePayment(server: McpServer, { paymentService, merchant, lo
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
     },
     ({ idempotencyKey, ...input }) =>
-      runTool(log, 'create_payment', async () => toolSuccess(await paymentService.create(merchant, input, idempotencyKey))),
+      runTool(tool, 'create_payment', async () => toolSuccess(await paymentService.create(merchant, input, idempotencyKey))),
   );
 }
 
-function registerRefundPayment(server: McpServer, { paymentService, merchant, log }: ToolDeps): void {
+function registerRefundPayment(server: McpServer, { paymentService, merchant, tool }: ToolDeps): void {
   server.registerTool(
     'refund_payment',
     {
@@ -120,7 +122,7 @@ function registerRefundPayment(server: McpServer, { paymentService, merchant, lo
       annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
     },
     ({ paymentId, amountMinor, idempotencyKey, confirm }) =>
-      runTool(log, 'refund_payment', async () => {
+      runTool(tool, 'refund_payment', async () => {
         if (confirm !== true) {
           // Same validations as the real refund, zero side effects, idempotency key untouched.
           const preview = await paymentService.previewRefund(merchant, paymentId, { amountMinor });

@@ -1,0 +1,18 @@
+global:
+  # 15 s is the usual production value; 5 s makes the local demo react faster.
+  scrape_interval: 5s
+  evaluation_interval: 5s
+
+rule_files:
+  - /etc/prometheus/alerts.yml
+
+scrape_configs:
+  - job_name: payments-mcp
+    metrics_path: /metrics
+    static_configs:
+      # The app container (npm run obs:up). In EKS this list is replaced by kubernetes_sd_configs.
+      - targets: ['app:3000']
+        labels: { runtime: compose }
+      # The app running on your machine with npm run dev (use one or the other).
+      - targets: ['host.docker.internal:3000']
+        labels: { runtime: host }
