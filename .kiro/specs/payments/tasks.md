@@ -46,6 +46,6 @@
   - [x] 8.2 Dockerfile + Prometheus (con alertas) + Loki + Alloy + Grafana (dashboard provisionado) en docker-compose
   - _Requisitos: 7.1–7.3_
 
-- [ ] 9. Agente demo con Anthropic SDK que consume `/mcp`
+- [x] 9. Agente demo con Anthropic SDK que consume `/mcp` (`npm run demo:agent`; aprobación humana en el host para tools destructivas)
 
 - [ ] 10. Terraform básico (SQS, DynamoDB con TTL, esqueleto de EKS)

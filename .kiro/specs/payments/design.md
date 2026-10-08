@@ -235,6 +235,30 @@ redactados. En Loki solo `app` y `level` son *labels*; `requestId` se busca al c
 
 Local: `npm run obs:up` → app en `:3000`, Grafana en `:3001`, Prometheus en `:9090`.
 
+## Agente demo (Anthropic SDK + cliente MCP)
+
+`src/agent/payments-agent.ts` + `scripts/agent-demo.ts` (`npm run demo:agent`).
+
+- **Cliente MCP local, no el MCP connector de la API.** El connector hace que los servidores de Anthropic
+  llamen al MCP: necesita una URL pública y no alcanza `localhost`. Con el cliente del SDK de MCP el
+  agente corre junto al servidor y además ejercita el flujo de autorización de la spec:
+  `ClientCredentialsProvider` recibe el 401, lee el Protected Resource Metadata, encuentra el
+  authorization server y pide el token solo. `expectedIssuer` evita mandar el secreto a otro servidor.
+- **Herramientas descubiertas, no escritas a mano:** `tools/list` (ya filtrado por scope) → `BetaTool`
+  con el mismo nombre, descripción y JSON Schema (`mcp-bridge.ts`).
+- **Loop manual:** `messages.create` → si `stop_reason = tool_use`, ejecutar todos los `tool_use` por MCP
+  (en paralelo), devolver todos los `tool_result` en **un** mensaje → repetir. Maneja `pause_turn`,
+  `refusal`, `max_tokens` y un tope de 10 pasos. El contenido del asistente (bloques de thinking incluidos)
+  se devuelve sin cambios.
+- **Errores:** `isError` de MCP → `is_error: true` (Claude se corrige); tool desconocida o servidor caído →
+  `tool_result` de error en vez de romper la conversación.
+- **Doble candado para reembolsos:** el servidor exige vista previa y `confirm: true`; además el host
+  pregunta a la persona antes de ejecutar una tool con `destructiveHint` y `confirm: true`. Sin callback
+  `approve`, se rechaza por defecto.
+- **Modelo:** `claude-opus-5-5`, `effort: medium`, caché automático del prefijo (tools + system),
+  `fallbacks: "default"` (beta `server-side-fallback-2026-07-01`) por si un clasificador rechaza.
+- **Tests sin API key:** un Claude "guionado" (respuestas fijas) contra el servidor MCP real de pruebas.
+
 ## Manejo de errores
 
 Formato único: `{ "error": { "code": "PAYMENT_NOT_FOUND", "message": "…", "requestId": "…" } }`.
